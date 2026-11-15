@@ -46,9 +46,11 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.1.8937393
           export PATH="${{ steps.install-qt.outputs.qt-path }}/bin:${{ steps.install-qt.outputs.qt-path }}/../gcc_64/bin:$PATH"
-          SSL_DIR="$PWD/openssl/ssl_3/arm64-v8a"
           mkdir build && cd build
-          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DANDROID_EXTRA_LIBS="$SSL_DIR/libcrypto_3.so;$SSL_DIR/libssl_3.so" ..
+          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT ..
+          cmake --build . --target PrismAndroidTest
+          MANIFEST_TPL=$(find "${{ steps.install-qt.outputs.qt-path }}" -name AndroidManifest.xml | head -n 1)
+          sed -i 's/<uses-permission android:name="android.permission.INTERNET"\/>/<uses-permission android:name="android.permission.INTERNET"\/><uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"\/>/' "$MANIFEST_TPL"
           cmake --build . --target apk
 
       - name: Upload APK
