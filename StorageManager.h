@@ -28,18 +28,13 @@ namespace StorageManager {
         QJniObject ctx = QNativeInterface::QAndroidApplication::context();
         if (!ctx.isValid()) return;
 
-        QJniObject pkg = QJniObject::fromString("package:org.prism.androidtest");
-        QJniObject uri = QJniObject::callStaticObjectMethod(
-            "android/net/Uri", "parse",
-            "(Ljava/lang/String;)Landroid/net/Uri;",
-            pkg.object<jstring>());
-
+        // Открываем общий список "Доступ ко всем файлам" (не вылетает на Xiaomi/HyperOS)
         QJniObject actStr = QJniObject::fromString(
-            "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION");
+            "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION");
         QJniObject intent(
             "android/content/Intent",
-            "(Ljava/lang/String;Landroid/net/Uri;)V",
-            actStr.object<jstring>(), uri.object());
+            "(Ljava/lang/String;)V",
+            actStr.object<jstring>());
 
         intent.callObjectMethod(
             "addFlags", "(I)Landroid/content/Intent;", 0x10000000);
@@ -55,8 +50,8 @@ namespace StorageManager {
             QMessageBox::information(
                 parent,
                 "Требуется разрешение",
-                "Включите управление хранилищем: зайдите в настройки и разрешения приложения, "
-                "затем разрешите управление хранилищем."
+                "Включите управление хранилищем: в открывшемся списке найдите "
+                "PrismAndroidTest и разрешите доступ ко всем файлам."
             );
             openStorageSettings();
             return false;
