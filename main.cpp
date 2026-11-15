@@ -31,12 +31,7 @@
 #include "GameLauncher.h"
 
 struct Inst {
-    QString id;
-    QString name;
-    QString mcVer;
-    QString loader;
-    QString loaderVer;
-    QString group;
+    QString id, name, mcVer, loader, loaderVer, group;
 };
 
 static QPixmap makePrismIcon(int sz) {
@@ -45,7 +40,7 @@ static QPixmap makePrismIcon(int sz) {
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
     double cx = sz / 2.0, cy = sz / 2.0, r = sz * 0.45;
-    QColor cols[8] = {
+    QColor cols = {
         QColor("#DF5B6D"), QColor("#F48A5A"), QColor("#F5DF65"),
         QColor("#78B88E"), QColor("#4C82C4"), QColor("#6C488E"),
         QColor("#574336"), QColor("#7E5538")
@@ -53,44 +48,32 @@ static QPixmap makePrismIcon(int sz) {
     p.setPen(Qt::NoPen);
     for (int i = 0; i < 8; ++i) {
         p.setBrush(cols[i]);
-        double a1 = -90 + i * 37.5;
         p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2),
-                  int(-a1 * 16), int(-37.5 * 16));
+                  int(-(-90 + i * 37.5) * 16), int(-37.5 * 16));
     }
     p.setBrush(QColor("#92CD5E"));
-    p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2),
-              int(90 * 16), int(60 * 16));
+    p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2), 90 * 16, 60 * 16);
     double ir = r * 0.48;
-    QPolygonF topF, leftF, rightF;
-    topF << QPointF(cx, cy - ir)
-         << QPointF(cx + ir * 0.86, cy - ir * 0.5)
-         << QPointF(cx, cy)
-         << QPointF(cx - ir * 0.86, cy - ir * 0.5);
-    leftF << QPointF(cx - ir * 0.86, cy - ir * 0.5)
-          << QPointF(cx, cy)
-          << QPointF(cx, cy + ir)
-          << QPointF(cx - ir * 0.86, cy + ir * 0.5);
-    rightF << QPointF(cx, cy)
-           << QPointF(cx + ir * 0.86, cy - ir * 0.5)
-           << QPointF(cx + ir * 0.86, cy + ir * 0.5)
-           << QPointF(cx, cy + ir);
-    p.setBrush(QColor("#FFFFFF"));
-    p.drawPolygon(topF);
-    p.setBrush(QColor("#DCDCDC"));
-    p.drawPolygon(leftF);
-    p.setBrush(QColor("#EAEAEA"));
-    p.drawPolygon(rightF);
+    QPolygonF tF, lF, rF;
+    tF << QPointF(cx, cy - ir) << QPointF(cx + ir * 0.86, cy - ir * 0.5)
+       << QPointF(cx, cy) << QPointF(cx - ir * 0.86, cy - ir * 0.5);
+    lF << QPointF(cx - ir * 0.86, cy - ir * 0.5) << QPointF(cx, cy)
+       << QPointF(cx, cy + ir) << QPointF(cx - ir * 0.86, cy + ir * 0.5);
+    rF << QPointF(cx, cy) << QPointF(cx + ir * 0.86, cy - ir * 0.5)
+       << QPointF(cx + ir * 0.86, cy + ir * 0.5) << QPointF(cx, cy + ir);
+    p.setBrush(QColor("#FFFFFF")); p.drawPolygon(tF);
+    p.setBrush(QColor("#DCDCDC")); p.drawPolygon(lF);
+    p.setBrush(QColor("#EAEAEA")); p.drawPolygon(rF);
     return pm;
 }
 
 class AddInstDialog : public QDialog {
 public:
     QString outName, outMc, outLoader, outLoaderVer, outGroup;
-
     AddInstDialog(QNetworkAccessManager *nam, QWidget *parent)
         : QDialog(parent), net(nam) {
-        setWindowTitle("Add Instance - Prism Launcher");
-        resize(540, 400);
+        setWindowTitle("Add Instance");
+        resize(520, 380);
         auto *lay = new QVBoxLayout(this);
 
         auto *hName = new QHBoxLayout();
@@ -105,32 +88,28 @@ public:
         hGrp->addWidget(edGroup);
         lay->addLayout(hGrp);
 
-        lay->addWidget(new QLabel("Minecraft Version (Official Mojang):"));
+        lay->addWidget(new QLabel("Minecraft Version:"));
         cbMc = new QComboBox();
-        cbMc->addItems({"1.21.4", "1.21.1", "1.20.4", "1.20.1",
-                        "1.19.2", "1.18.2", "1.16.5", "1.12.2"});
+        cbMc->addItems({"1.21.4", "1.21.1", "1.20.4", "1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2"});
         lay->addWidget(cbMc);
 
         QUrl mUrl("https://mojang.com");
         auto *rep = net->get(QNetworkRequest(mUrl));
         connect(rep, &QNetworkReply::finished, [this, rep]() {
             if (rep->error() == QNetworkReply::NoError) {
-                auto doc = QJsonDocument::fromJson(rep->readAll());
-                auto arr = doc.object()["versions"].toArray();
+                auto arr = QJsonDocument::fromJson(rep->readAll()).object()["versions"].toArray();
                 if (!arr.isEmpty()) {
                     cbMc->clear();
                     for (int i = 0; i < arr.size() && i < 60; ++i) {
-                        auto obj = arr[i].toObject();
-                        if (obj["type"].toString() == "release") {
-                            cbMc->addItem(obj["id"].toString());
-                        }
+                        auto o = arr[i].toObject();
+                        if (o["type"].toString() == "release") cbMc->addItem(o["id"].toString());
                     }
                 }
             }
             rep->deleteLater();
         });
 
-        lay->addWidget(new QLabel("Mod Loader (Original):"));
+        lay->addWidget(new QLabel("Mod Loader:"));
         auto *hLoad = new QHBoxLayout();
         grpLoader = new QButtonGroup(this);
         QStringList loaders = {"Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"};
@@ -144,18 +123,17 @@ public:
 
         lay->addWidget(new QLabel("Loader Version:"));
         cbLoaderVer = new QComboBox();
-        cbLoaderVer->addItem("None (Vanilla)");
+        cbLoaderVer->addItem("None");
         lay->addWidget(cbLoaderVer);
 
-        auto updateAll = [this]() {
+        auto upd = [this]() {
             QString mc = cbMc->currentText();
             QString ld = grpLoader->checkedButton()->text();
             edName->setText(ld == "Vanilla" ? mc : (ld + " " + mc));
-            fetchLoaderVersions(mc, ld);
+            fetchLoader(mc, ld);
         };
-
-        connect(cbMc, &QComboBox::currentTextChanged, updateAll);
-        connect(grpLoader, &QButtonGroup::idClicked, updateAll);
+        connect(cbMc, &QComboBox::currentTextChanged, upd);
+        connect(grpLoader, &QButtonGroup::idClicked, upd);
 
         auto *hBtns = new QHBoxLayout();
         auto *bOk = new QPushButton("OK");
@@ -183,23 +161,15 @@ private:
     QComboBox *cbMc, *cbLoaderVer;
     QButtonGroup *grpLoader;
 
-    void fetchLoaderVersions(const QString &mc, const QString &ld) {
+    void fetchLoader(const QString &mc, const QString &ld) {
         cbLoaderVer->clear();
-        if (ld == "Vanilla") {
-            cbLoaderVer->addItem("None");
-            return;
-        }
+        if (ld == "Vanilla") { cbLoaderVer->addItem("None"); return; }
         cbLoaderVer->addItem("Loading...");
         QUrl url;
-        if (ld == "Fabric") {
-            url = QUrl("https://fabricmc.net" + mc);
-        } else if (ld == "Quilt") {
-            url = QUrl("https://quiltmc.org" + mc);
-        } else if (ld == "NeoForge") {
-            url = QUrl("https://neoforged.net");
-        } else if (ld == "Forge") {
-            url = QUrl("https://minecraftforge.net");
-        }
+        if (ld == "Fabric") url = QUrl("https://fabricmc.net" + mc);
+        else if (ld == "Quilt") url = QUrl("https://quiltmc.org" + mc);
+        else if (ld == "NeoForge") url = QUrl("https://neoforged.net");
+        else if (ld == "Forge") url = QUrl("https://minecraftforge.net");
 
         auto *rep = net->get(QNetworkRequest(url));
         connect(rep, &QNetworkReply::finished, [this, rep, ld, mc]() {
@@ -214,19 +184,15 @@ private:
                     }
                 } else if (ld == "NeoForge") {
                     auto arr = doc.object()["versions"].toArray();
-                    for (int i = arr.size() - 1; i >= 0 && cbLoaderVer->count() < 15; --i) {
+                    for (int i = arr.size() - 1; i >= 0 && cbLoaderVer->count() < 15; --i)
                         cbLoaderVer->addItem(arr[i].toString());
-                    }
                 } else if (ld == "Forge") {
                     auto promos = doc.object()["promos"].toObject();
-                    if (promos.contains(mc + "-recommended"))
-                        cbLoaderVer->addItem(promos[mc + "-recommended"].toString());
-                    if (promos.contains(mc + "-latest"))
-                        cbLoaderVer->addItem(promos[mc + "-latest"].toString());
+                    if (promos.contains(mc + "-recommended")) cbLoaderVer->addItem(promos[mc + "-recommended"].toString());
+                    if (promos.contains(mc + "-latest")) cbLoaderVer->addItem(promos[mc + "-latest"].toString());
                 }
             }
-            if (cbLoaderVer->count() == 0)
-                cbLoaderVer->addItem("Official " + ld + " (" + mc + ")");
+            if (cbLoaderVer->count() == 0) cbLoaderVer->addItem("Official " + ld);
             rep->deleteLater();
         });
     }
@@ -235,33 +201,50 @@ private:
 class GameOverlayDialog : public QDialog {
 public:
     GameOverlayDialog(const Inst &inst, QWidget *parent) : QDialog(parent) {
-        setWindowTitle("Minecraft " + inst.mcVer);
         setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
         showFullScreen();
         setStyleSheet("background:#101820; color:white;");
-
         auto *vMain = new QVBoxLayout(this);
         vMain->setContentsMargins(16, 12, 16, 12);
 
         auto *hTop = new QHBoxLayout();
-        auto *info = new QLabel("Running: " + inst.name + " [" + inst.loader + "]");
-        info->setStyleSheet("color:#8899A6; font-size:12px;");
-        hTop->addWidget(info);
+        hTop->addWidget(new QLabel("Running: " + inst.name));
         hTop->addStretch();
-
-        auto mkTopBtn = [](const QString &t) {
+        auto mkBtn = [](const QString &t, int w, int h) {
             auto *b = new QPushButton(t);
-            b->setFixedSize(44, 44);
-            b->setStyleSheet("background:rgba(255,255,255,40);border-radius:8px;color:white;font-weight:bold;");
+            b->setFixedSize(w, h);
+            b->setStyleSheet("background:rgba(255,255,255,45);border-radius:8px;color:white;font-weight:bold;");
             return b;
         };
-        auto *bF5 = mkTopBtn("F5");
-        auto *bChat = mkTopBtn("T");
-        auto *bEsc = mkTopBtn("||");
+        auto *bEsc = mkBtn("||", 44, 44);
         connect(bEsc, &QPushButton::clicked, this, &QDialog::accept);
-        hTop->addWidget(bF5);
-        hTop->addWidget(bChat);
+        hTop->addWidget(mkBtn("F5", 44, 44));
+        hTop->addWidget(mkBtn("T", 44, 44));
         hTop->addWidget(bEsc);
         vMain->addLayout(hTop);
 
         vMain->addStretch();
+        auto *hint = new QLabel("Экран игры (Нажмите || вверху справа для выхода)");
+        hint->setAlignment(Qt::AlignCenter);
+        vMain->addWidget(hint);
+        vMain->addStretch();
+
+        auto *hBot = new QHBoxLayout();
+        auto *pad = new QGridLayout();
+        pad->addWidget(mkBtn("W", 50, 50), 0, 1);
+        pad->addWidget(mkBtn("A", 50, 50), 1, 0);
+        pad->addWidget(mkBtn("S", 50, 50), 1, 1);
+        pad->addWidget(mkBtn("D", 50, 50), 1, 2);
+        hBot->addLayout(pad);
+        hBot->addStretch();
+
+        auto *hBar = new QHBoxLayout();
+        for (int i = 1; i <= 9; ++i) hBar->addWidget(mkBtn(QString::number(i), 34, 34));
+        hBar->addWidget(mkBtn("...", 34, 34));
+        hBot->addLayout(hBar);
+        hBot->addStretch();
+
+        auto *vAct = new QVBoxLayout();
+        vAct->addWidget(mkBtn("↑", 50, 50));
+        vAct->addWidget(mkBtn("↓", 50, 50));
+        hBot->addLayout(vAct);
