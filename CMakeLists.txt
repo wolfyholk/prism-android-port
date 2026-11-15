@@ -11,6 +11,7 @@ qt_add_executable(PrismAndroidTest
     MANUAL_FINALIZATION
     main.cpp
     StorageManager.h
+    TouchControls.h
     GameLauncher.h
     GameLauncher.cpp
 )
