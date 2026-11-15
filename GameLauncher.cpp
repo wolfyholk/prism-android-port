@@ -10,6 +10,7 @@
 #include <QNetworkReply>
 #include <QProgressDialog>
 #include <QMessageBox>
+#include <QProcess>
 
 GameLauncher::GameLauncher(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent), net(nam) {}
@@ -28,7 +29,6 @@ void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) 
     QDir().mkpath(cfg.dataDir + "/libraries");
     QDir().mkpath(verDir);
 
-    // Всегда проверяем манифест версии, чтобы докачать все библиотеки libraries/*.jar
     downloadVersionManifest(cfg, parentUi);
 }
 
@@ -85,7 +85,6 @@ void GameLauncher::parseAndDownloadLibraries(const QByteArray &verJsonBytes,
     auto libs = doc["libraries"].toArray();
     for (const auto &item : libs) {
         auto libObj = item.toObject();
-        // Пропускаем нативные библиотеки для Windows/macOS
         if (libObj.contains("rules")) {
             bool allowLinux = false;
             for (const auto &r : libObj["rules"].toArray()) {
@@ -111,7 +110,6 @@ void GameLauncher::parseAndDownloadLibraries(const QByteArray &verJsonBytes,
 
     totalLibs = libQueue.size();
     if (totalLibs == 0) {
-        // Все библиотеки уже скачаны — проверяем client.jar
         QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar";
         if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
             startJavaProcess(jarPath, cfg, parentUi);
@@ -193,14 +191,64 @@ void GameLauncher::downloadClientJar(const QString &url, const QString &jarPath,
 
 void GameLauncher::startJavaProcess(const QString &jarPath, const LaunchConfig &cfg,
                                     QWidget *parentUi) {
-    double mb = QFileInfo(jarPath).size() / (1024.0 * 1024.0);
-    QMessageBox::information(parentUi, "Библиотеки и клиент готовы!",
-        "Аккаунт: " + cfg.nick + " (" + cfg.accType + ")\n" +
-        "Версия: " + cfg.mcVer + " (" + cfg.loader + ")\n" +
-        "Библиотеки: скачаны в libraries/\n" +
-        "Клиент: " + QString::number(mb, 'f', 1) + " МБ\n" +
-        "Нужная Java: " + selectJavaVersion(cfg.mcVer));
+    QStringList cpList;
+    QDir libDir(cfg.dataDir + "/libraries");
+    QStringList filters = {"*.jar"};
+    QList<QDir> stack = {libDir};
+    while (!stack.isEmpty()) {
+        QDir cur = stack.takeFirst();
+        for (const auto &fi : cur.entryInfoList(filters, QDir::Files)) {
+            cpList.append(fi.absoluteFilePath());
+        }
+        for (const auto &sub : cur.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            stack.append(QDir(sub.absoluteFilePath()));
+        }
+    }
+    cpList.append(jarPath);
+    QString fullClasspath = cpList.join(":");
 
-    TouchOverlay overlay(cfg.mcVer, parentUi);
+    QString skinPackSrc = cfg.dataDir + "/skins/CustomSkinPack";
+    QString instGameDir = cfg.dataDir + "/instances/" + cfg.instId + "/.minecraft";
+    QDir().mkpath(instGameDir + "/resourcepacks");
+    if (QDir(skinPackSrc).exists()) {
+        QString dstSkin = instGameDir + "/resourcepacks/CustomSkinPack/assets/minecraft/textures/entity/player/wide";
+        QDir().mkpath(dstSkin);
+        QFile::copy(cfg.dataDir + "/skins/" + cfg.nick + ".png", dstSkin + "/steve.png");
+    }
+
+    QString javaExec = cfg.dataDir + "/java/jre21/bin/java";
+    if (!QFile::exists(javaExec)) javaExec = "/system/bin/app_process64";
+
+    QStringList args;
+    args << "-Xmx" + QString::number(cfg.ramMb) + "M"
+         << "-Xms512M"
+         << "-Dorg.lwjgl.opengl.libname=libgl4es_114.so"
+         << "-Dglfwstub.windowWidth=1280"
+         << "-Dglfwstub.windowHeight=720"
+         << "-Duser.home=" + cfg.dataDir
+         << "-cp" << fullClasspath
+         << "net.minecraft.client.main.Main"
+         << "--username" << cfg.nick
+         << "--version" << cfg.mcVer
+         << "--gameDir" << instGameDir
+         << "--assetsDir" << cfg.dataDir + "/assets"
+         << "--uuid" << cfg.uuid
+         << "--accessToken" << cfg.token
+         << "--userType" << (cfg.accType == "MSA" ? "msa" : "legacy");
+
+    auto *jvmProcess = new QProcess(parentUi);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("LIBGL_ES", "2");
+    env.insert("LIBGL_MIPMAP", "3");
+    env.insert("LIBGL_NORMALIZE", "1");
+    jvmProcess->setProcessEnvironment(env);
+    jvmProcess->setWorkingDirectory(instGameDir);
+    jvmProcess->start(javaExec, args);
+
+    TouchOverlay overlay(cfg.mcVer + " | " + cfg.nick, parentUi);
     overlay.exec();
+
+    if (jvmProcess->state() != QProcess::NotRunning) {
+        jvmProcess->kill();
+    }
 }
