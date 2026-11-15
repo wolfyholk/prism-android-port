@@ -27,7 +27,7 @@ public:
 
 private:
     QNetworkAccessManager *net;
-    QList<QPair<QString, QString>> libQueue; // <URL, локальный путь в libraries/>
+    QList<QPair<QString, QString>> libQueue;
     int totalLibs = 0;
 
     QString selectJavaVersion(const QString &mcVer);
@@ -36,6 +36,6 @@ private:
     void downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg, QWidget *parentUi, class QProgressDialog *dlg);
     void downloadClientJar(const QString &clientUrl, const QString &jarPath,
                            const LaunchConfig &cfg, QWidget *parentUi);
-    void startJavaProcess(const QString &jarPath, const LaunchConfig &cfg,
-                          QWidget *parentUi);
+    void ensureJavaAndRun(const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi);
+    void startJavaProcess(const QString &javaBin, const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi);
 };
