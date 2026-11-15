@@ -8,10 +8,8 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QFrame>
-#include <QListWidget>
 #include <QMessageBox>
 #include <QInputDialog>
-#include <QStatusBar>
 #include <QStyleFactory>
 
 struct InstanceItem {
@@ -23,15 +21,12 @@ struct InstanceItem {
 };
 
 class PrismMainWindow : public QMainWindow {
-    Q_OBJECT
-
 public:
     PrismMainWindow(QWidget *parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("Prism Launcher 9.4");
         resize(1024, 640);
         applyDarkTheme();
 
-        // Тестовые сборки как на скриншоте
         instances = {
             {"Fabric 1.16.5", "1.16.5", "Ungrouped", "#36C5F0", "F"},
             {"Forge 1.12.2", "1.12.2", "Ungrouped", "#D93829", "TNT"},
@@ -54,7 +49,7 @@ public:
         rootLayout->setContentsMargins(0, 0, 0, 0);
         rootLayout->setSpacing(0);
 
-        // 1. ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (Toolbar)
+        // 1. ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ
         QWidget *topBar = new QWidget();
         topBar->setFixedHeight(44);
         topBar->setStyleSheet("background-color: #2B2B2B; border-bottom: 1px solid #141414;");
@@ -84,12 +79,11 @@ public:
         topLayout->addWidget(btnAccounts);
         rootLayout->addWidget(topBar);
 
-        // 2. ЦЕНТРАЛЬНАЯ ОБЛАСТЬ (Сетка сборок слева + Панель управления справа)
+        // 2. ЦЕНТРАЛЬНАЯ ОБЛАСТЬ
         QHBoxLayout *middleLayout = new QHBoxLayout();
         middleLayout->setContentsMargins(0, 0, 0, 0);
         middleLayout->setSpacing(0);
 
-        // Скролл-область с категориями и иконками сборок
         QScrollArea *scrollArea = new QScrollArea();
         scrollArea->setWidgetResizable(true);
         scrollArea->setFrameShape(QFrame::NoFrame);
@@ -104,7 +98,7 @@ public:
         scrollArea->setWidget(gridContainer);
         middleLayout->addWidget(scrollArea, 1);
 
-        // Правая боковая панель (как в Prism Launcher)
+        // Правая боковая панель
         QWidget *rightPanel = new QWidget();
         rightPanel->setFixedWidth(185);
         rightPanel->setStyleSheet("background-color: #252525; border-left: 1px solid #141414;");
@@ -226,3 +220,5 @@ private:
             "QPushButton:disabled { color: #666666; }"
         );
         if (primary) {
+            btn->setStyleSheet(
+                "QPushButton { text-align: left; background-color: #2E3436; color: #FFFFFF; font-weight: bold; border: 1px solid #3E4446; padding: 8px 8px; border-radius: 4px; font-size: 13px; }"
