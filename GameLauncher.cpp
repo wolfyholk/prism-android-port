@@ -1,4 +1,5 @@
 #include "GameLauncher.h"
+#include "TouchControls.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -7,7 +8,6 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include <QSslConfiguration>
 #include <QProgressDialog>
 #include <QMessageBox>
 
@@ -40,7 +40,7 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *par
     dlg->setWindowModality(Qt::WindowModal);
     dlg->show();
 
-    QNetworkRequest req(QUrl("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"));
+    QNetworkRequest req(QUrl("https://mojang.com"));
     auto *rep = net->get(req);
 
     connect(rep, &QNetworkReply::finished, [this, rep, dlg, cfg, parentUi]() {
@@ -116,4 +116,7 @@ void GameLauncher::startJavaProcess(const QString &jarPath, const LaunchConfig &
         "Файл: " + jarPath + "\n" +
         "Размер: " + QString::number(mb, 'f', 1) + " МБ\n" +
         "Нужная Java: " + selectJavaVersion(cfg.mcVer));
+
+    TouchOverlay overlay(cfg.mcVer, parentUi);
+    overlay.exec();
 }
