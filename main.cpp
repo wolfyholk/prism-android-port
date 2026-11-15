@@ -4,7 +4,6 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QListWidget>
-#include <QInputDialog>
 #include <QDir>
 #include <QFile>
 #include <QDateTime>
@@ -14,6 +13,7 @@
 #include "StorageManager.h"
 #include "AccountManager.h"
 #include "SkinManager.h"
+#include "VersionPicker.h"
 #include "GameLauncher.h"
 
 struct Inst { QString id, name, mc, ld; };
@@ -103,15 +103,16 @@ int main(int argc, char *argv[]) {
     QObject::connect(bAdd, &QPushButton::clicked, [&]() {
         if (!StorageManager::ensureReady(dir, &w)) return;
         if (list.isEmpty()) load();
-        QString mc = QInputDialog::getText(&w, "Add", "Версия (напр. 1.21.4):", QLineEdit::Normal, "1.21.4");
-        if (mc.isEmpty()) return;
-        QStringList lds = {"Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"};
-        QString ld = QInputDialog::getItem(&w, "Loader", "Загрузчик:", lds, 0, false);
-        if (ld.isEmpty()) return;
-        QString id = ld + "_" + mc + "_" + QString::number(QDateTime::currentSecsSinceEpoch());
-        QDir().mkpath(dir + "/instances/" + id + "/.minecraft/mods");
-        list.append({id, ld + " " + mc, mc, ld});
-        save(); redraw();
+
+        VersionPickerDialog dlg(net, &w);
+        if (dlg.exec() == QDialog::Accepted) {
+            QString mc = dlg.selectedVer;
+            QString ld = dlg.selectedLoader;
+            QString id = ld + "_" + mc + "_" + QString::number(QDateTime::currentSecsSinceEpoch());
+            QDir().mkpath(dir + "/instances/" + id + "/.minecraft/mods");
+            list.append({id, ld + " " + mc, mc, ld});
+            save(); redraw();
+        }
     });
 
     QObject::connect(bDel, &QPushButton::clicked, [&]() {
