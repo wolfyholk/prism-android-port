@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include "StorageManager.h"
+#include "AccountManager.h"
 #include "GameLauncher.h"
 
 struct Inst { QString id, name, mc, ld; };
@@ -26,15 +27,22 @@ int main(int argc, char *argv[]) {
     auto *net = new QNetworkAccessManager(&w);
     auto *gl = new GameLauncher(net, &w);
     QList<Inst> list;
+    AccountInfo curAcc{"Player", "Offline", AccountManager::makeOfflineUuid("Player"), "0"};
 
     auto *cw = new QWidget(&w);
     auto *vl = new QVBoxLayout(cw);
     auto *hl = new QHBoxLayout();
     auto *bAdd = new QPushButton("+ Add Instance");
     auto *bDel = new QPushButton("Delete");
+    auto *bAcc = new QPushButton("Accounts (" + curAcc.name + ")");
     auto *bRun = new QPushButton("> Launch");
     bRun->setStyleSheet("background:#2B7CD3;font-weight:bold;padding:8px;");
-    hl->addWidget(bAdd); hl->addWidget(bDel); hl->addStretch(); hl->addWidget(bRun);
+
+    hl->addWidget(bAdd);
+    hl->addWidget(bDel);
+    hl->addStretch();
+    hl->addWidget(bAcc);
+    hl->addWidget(bRun);
     vl->addLayout(hl);
 
     auto *lw = new QListWidget();
@@ -67,11 +75,22 @@ int main(int argc, char *argv[]) {
             }
             f.close();
         }
+        auto accs = AccountManager::load(dir);
+        if (!accs.isEmpty()) {
+            curAcc = accs.first();
+            bAcc->setText("Accounts (" + curAcc.name + ")");
+        }
         redraw();
     };
 
     w.show();
     if (StorageManager::ensureReady(dir, &w)) load();
+
+    QObject::connect(bAcc, &QPushButton::clicked, [&]() {
+        if (!StorageManager::ensureReady(dir, &w)) return;
+        curAcc = AccountManager::openDialog(dir, net, &w);
+        bAcc->setText("Accounts (" + curAcc.name + ")");
+    });
 
     QObject::connect(bAdd, &QPushButton::clicked, [&]() {
         if (!StorageManager::ensureReady(dir, &w)) return;
@@ -100,7 +119,8 @@ int main(int argc, char *argv[]) {
         if (!StorageManager::ensureReady(dir, &w)) return;
         int r = lw->currentRow();
         if (r >= 0) {
-            gl->prepareAndLaunch({list[r].id, list[r].name, list[r].mc, list[r].ld, "latest", "Player", dir, 2048}, &w);
+            gl->prepareAndLaunch({list[r].id, list[r].name, list[r].mc, list[r].ld,
+                                  "latest", curAcc.name, curAcc.type, curAcc.uuid, curAcc.token, dir, 2048}, &w);
         }
     });
 
