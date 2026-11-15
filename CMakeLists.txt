@@ -13,6 +13,7 @@ qt_add_executable(PrismAndroidTest
     StorageManager.h
     TouchControls.h
     AccountManager.h
+    SkinManager.h
     GameLauncher.h
     GameLauncher.cpp
 )
@@ -24,12 +25,13 @@ target_link_libraries(PrismAndroidTest PRIVATE
 )
 
 set(SSL_ROOT "${CMAKE_SOURCE_DIR}/openssl/ssl_3/arm64-v8a")
+file(GLOB RUNTIME_LIBS "${CMAKE_SOURCE_DIR}/runtime_libs/*.so")
 
 set_target_properties(PrismAndroidTest PROPERTIES
     QT_ANDROID_PACKAGE_NAME "org.prism.androidtest"
     QT_ANDROID_MIN_SDK_VERSION "26"
     QT_ANDROID_TARGET_SDK_VERSION "33"
-    QT_ANDROID_EXTRA_LIBS "${SSL_ROOT}/libcrypto_3.so;${SSL_ROOT}/libssl_3.so"
+    QT_ANDROID_EXTRA_LIBS "${SSL_ROOT}/libcrypto_3.so;${SSL_ROOT}/libssl_3.so;${RUNTIME_LIBS}"
 )
 
 qt_finalize_executable(PrismAndroidTest)
