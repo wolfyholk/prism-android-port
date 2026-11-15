@@ -13,235 +13,155 @@
 #include <QMessageBox>
 #include <QProcess>
 
-GameLauncher::GameLauncher(QNetworkAccessManager *nam, QObject *parent)
-    : QObject(parent), net(nam) {}
+GameLauncher::GameLauncher(QNetworkAccessManager *nam, QObject *parent) : QObject(parent), net(nam) {}
 
-QString GameLauncher::selectJavaVersion(const QString &mcVer) {
-    if (mcVer.startsWith("26.")) return "21";
-    if (mcVer.startsWith("1.21") || mcVer == "1.20.5" || mcVer == "1.20.6") return "21";
-    if (mcVer.startsWith("1.17") || mcVer.startsWith("1.18") ||
-        mcVer.startsWith("1.19") || mcVer.startsWith("1.20")) return "17";
-    return "8";
+QString GameLauncher::selectJavaVersion(const QString &v) {
+    return (v.startsWith("26.") || v.startsWith("1.21")) ? "21" : "17";
 }
 
-void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) {
-    QString verDir = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed();
+void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *ui) {
+    QString vDir = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed();
     QDir().mkpath(cfg.dataDir + "/instances/" + cfg.instId + "/mods");
     QDir().mkpath(cfg.dataDir + "/libraries");
-    QDir().mkpath(verDir);
-
-    downloadVersionManifest(cfg, parentUi);
+    QDir().mkpath(vDir);
+    downloadVersionManifest(cfg, ui);
 }
 
-void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog("Поиск версии " + cfg.mcVer + " в манифесте Mojang...", "Отмена", 0, 0, parentUi);
-    dlg->setWindowModality(Qt::WindowModal);
-    dlg->show();
-
-    QNetworkRequest req(QUrl("https://mojang.com"));
-    auto *rep = net->get(req);
-
-    connect(rep, &QNetworkReply::finished, [this, rep, dlg, cfg, parentUi]() {
+void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *ui) {
+    auto *dlg = new QProgressDialog("Поиск " + cfg.mcVer + "...", "Отмена", 0, 0, ui);
+    dlg->setWindowModality(Qt::WindowModal); dlg->show();
+    auto *rep = net->get(QNetworkRequest(QUrl("https://mojang.com")));
+    connect(rep, &QNetworkReply::finished, [this, rep, dlg, cfg, ui]() {
         dlg->close(); dlg->deleteLater();
-        if (rep->error() != QNetworkReply::NoError) {
-            QMessageBox::warning(parentUi, "Ошибка сети", rep->errorString());
-            rep->deleteLater();
-            return;
-        }
+        if (rep->error() != QNetworkReply::NoError) { QMessageBox::warning(ui, "Ошибка", rep->errorString()); rep->deleteLater(); return; }
         auto arr = QJsonDocument::fromJson(rep->readAll()).object()["versions"].toArray();
         rep->deleteLater();
-
-        QString targetVer = cfg.mcVer.trimmed();
-        QString verUrl;
-        for (const auto &v : arr) {
-            if (v.toObject()["id"].toString().trimmed() == targetVer) {
-                verUrl = v.toObject()["url"].toString();
-                break;
-            }
-        }
-        if (verUrl.isEmpty()) {
-            QMessageBox::warning(parentUi, "Версия не найдена",
-                "Версия «" + targetVer + "» отсутствует в списке Mojang.");
-            return;
-        }
-
-        auto *vRep = net->get(QNetworkRequest(QUrl(verUrl)));
-        connect(vRep, &QNetworkReply::finished, [this, vRep, cfg, parentUi]() {
-            if (vRep->error() != QNetworkReply::NoError) {
-                QMessageBox::warning(parentUi, "Ошибка", vRep->errorString());
-                vRep->deleteLater();
-                return;
-            }
-            QByteArray rawJson = vRep->readAll();
-            vRep->deleteLater();
-            parseAndDownloadLibraries(rawJson, cfg, parentUi);
+        QString url, tv = cfg.mcVer.trimmed();
+        for (const auto &v : arr) if (v.toObject()["id"].toString().trimmed() == tv) { url = v.toObject()["url"].toString(); break; }
+        if (url.isEmpty()) { QMessageBox::warning(ui, "Ошибка", "Версия " + tv + " не найдена."); return; }
+        auto *vr = net->get(QNetworkRequest(QUrl(url)));
+        connect(vr, &QNetworkReply::finished, [this, vr, cfg, ui]() {
+            if (vr->error() == QNetworkReply::NoError) parseAndDownloadLibraries(vr->readAll(), cfg, ui);
+            vr->deleteLater();
         });
     });
 }
 
-void GameLauncher::parseAndDownloadLibraries(const QByteArray &verJsonBytes,
-                                             const LaunchConfig &cfg, QWidget *parentUi) {
-    auto doc = QJsonDocument::fromJson(verJsonBytes).object();
+void GameLauncher::parseAndDownloadLibraries(const QByteArray &raw, const LaunchConfig &cfg, QWidget *ui) {
+    auto doc = QJsonDocument::fromJson(raw).object();
     QString jarUrl = doc["downloads"].toObject()["client"].toObject()["url"].toString();
-
     libQueue.clear();
-    auto libs = doc["libraries"].toArray();
-    for (const auto &item : libs) {
-        auto libObj = item.toObject();
-        if (libObj.contains("rules")) {
-            bool allowLinux = false;
-            for (const auto &r : libObj["rules"].toArray()) {
-                auto ro = r.toObject();
-                QString osName = ro["os"].toObject()["name"].toString();
-                if (ro["action"].toString() == "allow" && (osName.isEmpty() || osName == "linux")) {
-                    allowLinux = true;
-                }
+    for (const auto &item : doc["libraries"].toArray()) {
+        auto lo = item.toObject();
+        if (lo.contains("rules")) {
+            bool ok = false;
+            for (const auto &r : lo["rules"].toArray()) {
+                QString os = r.toObject()["os"].toObject()["name"].toString();
+                if (r.toObject()["action"] == "allow" && (os.isEmpty() || os == "linux")) ok = true;
             }
-            if (!allowLinux) continue;
+            if (!ok) continue;
         }
-
-        auto art = libObj["downloads"].toObject()["artifact"].toObject();
-        QString url = art["url"].toString();
-        QString path = art["path"].toString();
-        if (!url.isEmpty() && !path.isEmpty()) {
-            QString localPath = cfg.dataDir + "/libraries/" + path;
-            if (!QFile::exists(localPath) || QFileInfo(localPath).size() == 0) {
-                libQueue.append(qMakePair(url, localPath));
-            }
+        auto art = lo["downloads"].toObject()["artifact"].toObject();
+        QString u = art["url"].toString(), p = art["path"].toString();
+        if (!u.isEmpty() && !p.isEmpty()) {
+            QString lp = cfg.dataDir + "/libraries/" + p;
+            if (!QFile::exists(lp) || QFileInfo(lp).size() == 0) libQueue.append({u, lp});
         }
     }
-
     totalLibs = libQueue.size();
-    QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
-
-    if (totalLibs == 0) {
-        if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-            ensureJavaAndRun(jarPath, cfg, parentUi);
-        } else {
-            downloadClientJar(jarUrl, jarPath, cfg, parentUi);
-        }
+    QString jp = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
+    if (!totalLibs) {
+        if (QFile::exists(jp) && QFileInfo(jp).size() > 1000000) ensureJavaAndRun(jp, cfg, ui);
+        else downloadClientJar(jarUrl, jp, cfg, ui);
         return;
     }
-
-    auto *dlg = new QProgressDialog("Загрузка библиотек (0 / " + QString::number(totalLibs) + ")...",
-                                    "Отмена", 0, totalLibs, parentUi);
-    dlg->setWindowModality(Qt::WindowModal);
-    dlg->show();
-    downloadNextLibrary(jarUrl, cfg, parentUi, dlg);
+    auto *dlg = new QProgressDialog("Библиотеки...", "Отмена", 0, totalLibs, ui);
+    dlg->setWindowModality(Qt::WindowModal); dlg->show();
+    downloadNextLibrary(jarUrl, cfg, ui, dlg);
 }
 
-void GameLauncher::downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg,
-                                       QWidget *parentUi, QProgressDialog *dlg) {
+void GameLauncher::downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg, QWidget *ui, QProgressDialog *dlg) {
     if (dlg->wasCanceled() || libQueue.isEmpty()) {
-        dlg->close();
-        dlg->deleteLater();
-        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
-        if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-            ensureJavaAndRun(jarPath, cfg, parentUi);
-        } else {
-            downloadClientJar(jarUrl, jarPath, cfg, parentUi);
-        }
-        return;
-    }
-
-    auto next = libQueue.takeFirst();
-    int done = totalLibs - libQueue.size();
-    dlg->setValue(done);
-    dlg->setLabelText("Загрузка библиотек (" + QString::number(done) + " / " +
-                      QString::number(totalLibs) + "):\n" + QFileInfo(next.second).fileName());
-
-    QDir().mkpath(QFileInfo(next.second).absolutePath());
-    auto *rep = net->get(QNetworkRequest(QUrl(next.first)));
-    connect(rep, &QNetworkReply::finished, [this, rep, next, jarUrl, cfg, parentUi, dlg]() {
-        if (rep->error() == QNetworkReply::NoError) {
-            QFile f(next.second);
-            if (f.open(QIODevice::WriteOnly)) {
-                f.write(rep->readAll());
-                f.close();
-            }
-        }
-        rep->deleteLater();
-        downloadNextLibrary(jarUrl, cfg, parentUi, dlg);
-    });
-}
-
-void GameLauncher::downloadClientJar(const QString &url, const QString &jarPath,
-                                     const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog("Скачивание client.jar (" + cfg.mcVer + ")...", "Отмена", 0, 100, parentUi);
-    dlg->setWindowModality(Qt::WindowModal);
-    dlg->show();
-
-    auto *rep = net->get(QNetworkRequest(QUrl(url)));
-    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) {
-        if (t > 0) dlg->setValue(int((r * 100) / t));
-    });
-
-    connect(rep, &QNetworkReply::finished, [this, rep, dlg, jarPath, cfg, parentUi]() {
         dlg->close(); dlg->deleteLater();
-        if (rep->error() != QNetworkReply::NoError) {
-            QMessageBox::warning(parentUi, "Ошибка загрузки", rep->errorString());
-            rep->deleteLater();
-            return;
-        }
-        QFile f(jarPath);
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(rep->readAll());
-            f.close();
+        QString jp = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
+        if (QFile::exists(jp) && QFileInfo(jp).size() > 1000000) ensureJavaAndRun(jp, cfg, ui);
+        else downloadClientJar(jarUrl, jp, cfg, ui);
+        return;
+    }
+    auto nxt = libQueue.takeFirst();
+    dlg->setValue(totalLibs - libQueue.size());
+    QDir().mkpath(QFileInfo(nxt.second).absolutePath());
+    auto *rep = net->get(QNetworkRequest(QUrl(nxt.first)));
+    connect(rep, &QNetworkReply::finished, [this, rep, nxt, jarUrl, cfg, ui, dlg]() {
+        if (rep->error() == QNetworkReply::NoError) {
+            QFile f(nxt.second); if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); }
         }
         rep->deleteLater();
-        ensureJavaAndRun(jarPath, cfg, parentUi);
+        downloadNextLibrary(jarUrl, cfg, ui, dlg);
     });
 }
 
-void GameLauncher::ensureJavaAndRun(const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi) {
-    // Внутренняя папка приложения (единственное место в Android 11+, где разрешен запуск bin/java)
-    QString appExecDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/runtime_jre21";
-    QString javaBin = appExecDir + "/bin/java";
-
-    if (QFile::exists(javaBin)) {
-        startJavaProcess(javaBin, jarPath, cfg, parentUi);
-        return;
-    }
-
-    auto *dlg = new QProgressDialog("Установка ARM64 Java Runtime (OpenJDK 21)...", "Отмена", 0, 100, parentUi);
-    dlg->setWindowModality(Qt::WindowModal);
-    dlg->show();
-
-    // Официальный релиз ARM64 Linux/Android JRE 21 (Adoptium Temurin)
-    QUrl jreUrl("https://adoptium.net");
-    QNetworkRequest req(jreUrl);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-
-    auto *rep = net->get(req);
-    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) {
-        if (t > 0) dlg->setValue(int((r * 100) / t));
-        else dlg->setLabelText("Скачивание Java 21 ARM64: " + QString::number(r / (1024 * 1024)) + " МБ...");
+void GameLauncher::downloadClientJar(const QString &url, const QString &jp, const LaunchConfig &cfg, QWidget *ui) {
+    auto *dlg = new QProgressDialog("Скачивание client.jar...", "Отмена", 0, 100, ui);
+    dlg->setWindowModality(Qt::WindowModal); dlg->show();
+    auto *rep = net->get(QNetworkRequest(QUrl(url)));
+    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) { if (t > 0) dlg->setValue(int(r * 100 / t)); });
+    connect(rep, &QNetworkReply::finished, [this, rep, dlg, jp, cfg, ui]() {
+        dlg->close(); dlg->deleteLater();
+        if (rep->error() == QNetworkReply::NoError) {
+            QFile f(jp); if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); }
+            rep->deleteLater(); ensureJavaAndRun(jp, cfg, ui);
+        } else rep->deleteLater();
     });
+}
 
-    connect(rep, &QNetworkReply::finished, [this, rep, dlg, appExecDir, javaBin, jarPath, cfg, parentUi]() {
-        dlg->close();
-        dlg->deleteLater();
-        if (rep->error() != QNetworkReply::NoError) {
-            // Если сеть заблокировала скачивание JRE, пробуем системную VM Android
-            rep->deleteLater();
-            startJavaProcess("/system/bin/app_process64", jarPath, cfg, parentUi);
-            return;
-        }
+void GameLauncher::ensureJavaAndRun(const QString &jp, const LaunchConfig &cfg, QWidget *ui) {
+    QString jDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/jre21";
+    QString jBin = jDir + "/bin/java";
+    if (QFile::exists(jBin)) { startJavaProcess(jBin, jp, cfg, ui); return; }
 
-        QDir().mkpath(appExecDir);
-        QString tarPath = appExecDir + "/jre21.tar.gz";
-        QFile f(tarPath);
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(rep->readAll());
-            f.close();
+    auto *dlg = new QProgressDialog("Установка Java 21 ARM64...", "Отмена", 0, 100, ui);
+    dlg->setWindowModality(Qt::WindowModal); dlg->show();
+    QNetworkRequest req(QUrl("https://adoptium.net"));
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    auto *rep = net->get(req);
+    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) { if (t > 0) dlg->setValue(int(r * 100 / t)); });
+    connect(rep, &QNetworkReply::finished, [this, rep, dlg, jDir, jBin, jp, cfg, ui]() {
+        dlg->close(); dlg->deleteLater();
+        if (rep->error() == QNetworkReply::NoError) {
+            QDir().mkpath(jDir);
+            QString tp = jDir + "/jre.tar.gz";
+            QFile f(tp); if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); }
+            QProcess::execute("tar", {"-xzf", tp, "-C", jDir, "--strip-components=1"});
+            QFile::remove(tp);
+            QProcess::execute("chmod", {"-R", "755", jDir + "/bin"});
         }
         rep->deleteLater();
+        startJavaProcess(QFile::exists(jBin) ? jBin : "/system/bin/app_process64", jp, cfg, ui);
+    });
+}
 
-        // Распаковка архива и выдача прав на запуск (chmod +x)
-        QProcess::execute("tar", {"-xzf", tarPath, "-C", appExecDir, "--strip-components=1"});
-        QFile::remove(tarPath);
-        QProcess::execute("chmod", {"-R", "755", appExecDir + "/bin"});
+void GameLauncher::startJavaProcess(const QString &jBin, const QString &jp, const LaunchConfig &cfg, QWidget *ui) {
+    QStringList cp;
+    QList<QDir> st = {QDir(cfg.dataDir + "/libraries")};
+    while (!st.isEmpty()) {
+        QDir c = st.takeFirst();
+        for (const auto &fi : c.entryInfoList({"*.jar"}, QDir::Files)) cp.append(fi.absoluteFilePath());
+        for (const auto &sd : c.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) st.append(QDir(sd.absoluteFilePath()));
+    }
+    cp.append(jp);
+    QString gDir = cfg.dataDir + "/instances/" + cfg.instId + "/.minecraft";
+    QDir().mkpath(gDir + "/resourcepacks");
 
-        if (QFile::exists(javaBin)) {
-            startJavaProcess(javaBin, jarPath, cfg, parentUi);
-        } else {
+    QStringList args = {"-Xmx" + QString::number(cfg.ramMb) + "M", "-Dorg.lwjgl.opengl.libname=libgl4es_114.so",
+                        "-cp", cp.join(":"), "net.minecraft.client.main.Main", "--username", cfg.nick,
+                        "--version", cfg.mcVer.trimmed(), "--gameDir", gDir, "--assetsDir", cfg.dataDir + "/assets",
+                        "--uuid", cfg.uuid, "--accessToken", cfg.token};
+    auto *p = new QProcess(ui);
+    p->setWorkingDirectory(gDir);
+    p->start(jBin, args);
+
+    TouchOverlay ov(cfg.mcVer + " | " + cfg.nick, ui);
+    ov.exec();
+    if (p->state() != QProcess::NotRunning) p->kill();
+}
