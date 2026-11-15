@@ -14,6 +14,7 @@ qt_add_executable(PrismAndroidTest
     TouchControls.h
     AccountManager.h
     SkinManager.h
+    VersionPicker.h
     GameLauncher.h
     GameLauncher.cpp
 )
