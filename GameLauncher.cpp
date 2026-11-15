@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -16,15 +17,15 @@ GameLauncher::GameLauncher(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent), net(nam) {}
 
 QString GameLauncher::selectJavaVersion(const QString &mcVer) {
-    if (mcVer.startsWith("26.")) return "Java 25+";
-    if (mcVer.startsWith("1.21") || mcVer == "1.20.5" || mcVer == "1.20.6") return "Java 21+";
+    if (mcVer.startsWith("26.")) return "21";
+    if (mcVer.startsWith("1.21") || mcVer == "1.20.5" || mcVer == "1.20.6") return "21";
     if (mcVer.startsWith("1.17") || mcVer.startsWith("1.18") ||
-        mcVer.startsWith("1.19") || mcVer.startsWith("1.20")) return "Java 17+";
-    return "Java 8+";
+        mcVer.startsWith("1.19") || mcVer.startsWith("1.20")) return "17";
+    return "8";
 }
 
 void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) {
-    QString verDir = cfg.dataDir + "/versions/" + cfg.mcVer;
+    QString verDir = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed();
     QDir().mkpath(cfg.dataDir + "/instances/" + cfg.instId + "/mods");
     QDir().mkpath(cfg.dataDir + "/libraries");
     QDir().mkpath(verDir);
@@ -33,7 +34,7 @@ void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) 
 }
 
 void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog("Проверка манифеста " + cfg.mcVer + "...", "Отмена", 0, 0, parentUi);
+    auto *dlg = new QProgressDialog("Поиск версии " + cfg.mcVer + " в манифесте Mojang...", "Отмена", 0, 0, parentUi);
     dlg->setWindowModality(Qt::WindowModal);
     dlg->show();
 
@@ -50,15 +51,17 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *par
         auto arr = QJsonDocument::fromJson(rep->readAll()).object()["versions"].toArray();
         rep->deleteLater();
 
+        QString targetVer = cfg.mcVer.trimmed();
         QString verUrl;
         for (const auto &v : arr) {
-            if (v.toObject()["id"].toString() == cfg.mcVer) {
+            if (v.toObject()["id"].toString().trimmed() == targetVer) {
                 verUrl = v.toObject()["url"].toString();
                 break;
             }
         }
         if (verUrl.isEmpty()) {
-            QMessageBox::warning(parentUi, "Ошибка", "Версия " + cfg.mcVer + " не найдена.");
+            QMessageBox::warning(parentUi, "Версия не найдена",
+                "Версия «" + targetVer + "» отсутствует в списке Mojang.");
             return;
         }
 
@@ -109,10 +112,11 @@ void GameLauncher::parseAndDownloadLibraries(const QByteArray &verJsonBytes,
     }
 
     totalLibs = libQueue.size();
+    QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
+
     if (totalLibs == 0) {
-        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar";
         if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-            startJavaProcess(jarPath, cfg, parentUi);
+            ensureJavaAndRun(jarPath, cfg, parentUi);
         } else {
             downloadClientJar(jarUrl, jarPath, cfg, parentUi);
         }
@@ -131,9 +135,9 @@ void GameLauncher::downloadNextLibrary(const QString &jarUrl, const LaunchConfig
     if (dlg->wasCanceled() || libQueue.isEmpty()) {
         dlg->close();
         dlg->deleteLater();
-        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar";
+        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
         if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-            startJavaProcess(jarPath, cfg, parentUi);
+            ensureJavaAndRun(jarPath, cfg, parentUi);
         } else {
             downloadClientJar(jarUrl, jarPath, cfg, parentUi);
         }
@@ -185,70 +189,59 @@ void GameLauncher::downloadClientJar(const QString &url, const QString &jarPath,
             f.close();
         }
         rep->deleteLater();
-        startJavaProcess(jarPath, cfg, parentUi);
+        ensureJavaAndRun(jarPath, cfg, parentUi);
     });
 }
 
-void GameLauncher::startJavaProcess(const QString &jarPath, const LaunchConfig &cfg,
-                                    QWidget *parentUi) {
-    QStringList cpList;
-    QDir libDir(cfg.dataDir + "/libraries");
-    QStringList filters = {"*.jar"};
-    QList<QDir> stack = {libDir};
-    while (!stack.isEmpty()) {
-        QDir cur = stack.takeFirst();
-        for (const auto &fi : cur.entryInfoList(filters, QDir::Files)) {
-            cpList.append(fi.absoluteFilePath());
+void GameLauncher::ensureJavaAndRun(const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi) {
+    // Внутренняя папка приложения (единственное место в Android 11+, где разрешен запуск bin/java)
+    QString appExecDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/runtime_jre21";
+    QString javaBin = appExecDir + "/bin/java";
+
+    if (QFile::exists(javaBin)) {
+        startJavaProcess(javaBin, jarPath, cfg, parentUi);
+        return;
+    }
+
+    auto *dlg = new QProgressDialog("Установка ARM64 Java Runtime (OpenJDK 21)...", "Отмена", 0, 100, parentUi);
+    dlg->setWindowModality(Qt::WindowModal);
+    dlg->show();
+
+    // Официальный релиз ARM64 Linux/Android JRE 21 (Adoptium Temurin)
+    QUrl jreUrl("https://adoptium.net");
+    QNetworkRequest req(jreUrl);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    auto *rep = net->get(req);
+    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) {
+        if (t > 0) dlg->setValue(int((r * 100) / t));
+        else dlg->setLabelText("Скачивание Java 21 ARM64: " + QString::number(r / (1024 * 1024)) + " МБ...");
+    });
+
+    connect(rep, &QNetworkReply::finished, [this, rep, dlg, appExecDir, javaBin, jarPath, cfg, parentUi]() {
+        dlg->close();
+        dlg->deleteLater();
+        if (rep->error() != QNetworkReply::NoError) {
+            // Если сеть заблокировала скачивание JRE, пробуем системную VM Android
+            rep->deleteLater();
+            startJavaProcess("/system/bin/app_process64", jarPath, cfg, parentUi);
+            return;
         }
-        for (const auto &sub : cur.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            stack.append(QDir(sub.absoluteFilePath()));
+
+        QDir().mkpath(appExecDir);
+        QString tarPath = appExecDir + "/jre21.tar.gz";
+        QFile f(tarPath);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(rep->readAll());
+            f.close();
         }
-    }
-    cpList.append(jarPath);
-    QString fullClasspath = cpList.join(":");
+        rep->deleteLater();
 
-    QString skinPackSrc = cfg.dataDir + "/skins/CustomSkinPack";
-    QString instGameDir = cfg.dataDir + "/instances/" + cfg.instId + "/.minecraft";
-    QDir().mkpath(instGameDir + "/resourcepacks");
-    if (QDir(skinPackSrc).exists()) {
-        QString dstSkin = instGameDir + "/resourcepacks/CustomSkinPack/assets/minecraft/textures/entity/player/wide";
-        QDir().mkpath(dstSkin);
-        QFile::copy(cfg.dataDir + "/skins/" + cfg.nick + ".png", dstSkin + "/steve.png");
-    }
+        // Распаковка архива и выдача прав на запуск (chmod +x)
+        QProcess::execute("tar", {"-xzf", tarPath, "-C", appExecDir, "--strip-components=1"});
+        QFile::remove(tarPath);
+        QProcess::execute("chmod", {"-R", "755", appExecDir + "/bin"});
 
-    QString javaExec = cfg.dataDir + "/java/jre21/bin/java";
-    if (!QFile::exists(javaExec)) javaExec = "/system/bin/app_process64";
-
-    QStringList args;
-    args << "-Xmx" + QString::number(cfg.ramMb) + "M"
-         << "-Xms512M"
-         << "-Dorg.lwjgl.opengl.libname=libgl4es_114.so"
-         << "-Dglfwstub.windowWidth=1280"
-         << "-Dglfwstub.windowHeight=720"
-         << "-Duser.home=" + cfg.dataDir
-         << "-cp" << fullClasspath
-         << "net.minecraft.client.main.Main"
-         << "--username" << cfg.nick
-         << "--version" << cfg.mcVer
-         << "--gameDir" << instGameDir
-         << "--assetsDir" << cfg.dataDir + "/assets"
-         << "--uuid" << cfg.uuid
-         << "--accessToken" << cfg.token
-         << "--userType" << (cfg.accType == "MSA" ? "msa" : "legacy");
-
-    auto *jvmProcess = new QProcess(parentUi);
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert("LIBGL_ES", "2");
-    env.insert("LIBGL_MIPMAP", "3");
-    env.insert("LIBGL_NORMALIZE", "1");
-    jvmProcess->setProcessEnvironment(env);
-    jvmProcess->setWorkingDirectory(instGameDir);
-    jvmProcess->start(javaExec, args);
-
-    TouchOverlay overlay(cfg.mcVer + " | " + cfg.nick, parentUi);
-    overlay.exec();
-
-    if (jvmProcess->state() != QProcess::NotRunning) {
-        jvmProcess->kill();
-    }
-}
+        if (QFile::exists(javaBin)) {
+            startJavaProcess(javaBin, jarPath, cfg, parentUi);
+        } else {
