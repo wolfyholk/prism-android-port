@@ -24,7 +24,6 @@ target_link_libraries(PrismAndroidTest PRIVATE
 set(SSL_ROOT "${CMAKE_SOURCE_DIR}/openssl/ssl_3/arm64-v8a")
 
 set_target_properties(PrismAndroidTest PROPERTIES
-    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android"
     QT_ANDROID_PACKAGE_NAME "org.prism.androidtest"
     QT_ANDROID_MIN_SDK_VERSION "26"
     QT_ANDROID_TARGET_SDK_VERSION "33"
