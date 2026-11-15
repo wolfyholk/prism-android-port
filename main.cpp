@@ -19,15 +19,16 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include <QSvgRenderer>
 #include <QPainter>
 #include <QPixmap>
+#include "GameLauncher.h"
 
 struct Inst {
     QString id;
@@ -38,7 +39,6 @@ struct Inst {
     QString group;
 };
 
-// Генератор оригинальной иконки Prism Launcher (как на картинке)
 static QPixmap makePrismIcon(int sz) {
     QPixmap pm(sz, sz);
     pm.fill(Qt::transparent);
@@ -50,7 +50,6 @@ static QPixmap makePrismIcon(int sz) {
         QColor("#78B88E"), QColor("#4C82C4"), QColor("#6C488E"),
         QColor("#574336"), QColor("#7E5538")
     };
-    // Верхний левый зеленый сектор и остальные 8 сегментов
     p.setPen(Qt::NoPen);
     for (int i = 0; i < 8; ++i) {
         p.setBrush(cols[i]);
@@ -61,7 +60,6 @@ static QPixmap makePrismIcon(int sz) {
     p.setBrush(QColor("#92CD5E"));
     p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2),
               int(90 * 16), int(60 * 16));
-    // Белый внутренний куб
     double ir = r * 0.48;
     QPolygonF topF, leftF, rightF;
     topF << QPointF(cx, cy - ir)
@@ -76,13 +74,15 @@ static QPixmap makePrismIcon(int sz) {
            << QPointF(cx + ir * 0.86, cy - ir * 0.5)
            << QPointF(cx + ir * 0.86, cy + ir * 0.5)
            << QPointF(cx, cy + ir);
-    p.setBrush(QColor("#FFFFFF")); p.drawPolygon(topF);
-    p.setBrush(QColor("#DCDCDC")); p.drawPolygon(leftF);
-    p.setBrush(QColor("#EAEAEA")); p.drawPolygon(rightF);
+    p.setBrush(QColor("#FFFFFF"));
+    p.drawPolygon(topF);
+    p.setBrush(QColor("#DCDCDC"));
+    p.drawPolygon(leftF);
+    p.setBrush(QColor("#EAEAEA"));
+    p.drawPolygon(rightF);
     return pm;
 }
 
-// Диалог создания сборки с официальными версиями и загрузчиками
 class AddInstDialog : public QDialog {
 public:
     QString outName, outMc, outLoader, outLoaderVer, outGroup;
@@ -90,7 +90,7 @@ public:
     AddInstDialog(QNetworkAccessManager *nam, QWidget *parent)
         : QDialog(parent), net(nam) {
         setWindowTitle("Add Instance - Prism Launcher");
-        resize(560, 420);
+        resize(540, 400);
         auto *lay = new QVBoxLayout(this);
 
         auto *hName = new QHBoxLayout();
@@ -111,10 +111,8 @@ public:
                         "1.19.2", "1.18.2", "1.16.5", "1.12.2"});
         lay->addWidget(cbMc);
 
-        // Загрузка реального списка версий с серверов Mojang
-        QNetworkRequest req(QUrl(
-            "https://mojang.com"));
-        auto *rep = net->get(req);
+        QUrl mUrl("https://mojang.com");
+        auto *rep = net->get(QNetworkRequest(mUrl));
         connect(rep, &QNetworkReply::finished, [this, rep]() {
             if (rep->error() == QNetworkReply::NoError) {
                 auto doc = QJsonDocument::fromJson(rep->readAll());
@@ -149,15 +147,15 @@ public:
         cbLoaderVer->addItem("None (Vanilla)");
         lay->addWidget(cbLoaderVer);
 
-        auto updateNameAndLoader = [this]() {
+        auto updateAll = [this]() {
             QString mc = cbMc->currentText();
             QString ld = grpLoader->checkedButton()->text();
             edName->setText(ld == "Vanilla" ? mc : (ld + " " + mc));
             fetchLoaderVersions(mc, ld);
         };
 
-        connect(cbMc, &QComboBox::currentTextChanged, updateNameAndLoader);
-        connect(grpLoader, &QButtonGroup::idClicked, updateNameAndLoader);
+        connect(cbMc, &QComboBox::currentTextChanged, updateAll);
+        connect(grpLoader, &QButtonGroup::idClicked, updateAll);
 
         auto *hBtns = new QHBoxLayout();
         auto *bOk = new QPushButton("OK");
@@ -234,7 +232,6 @@ private:
     }
 };
 
-// Игровой оверлей с сенсорным управлением как на вашей схеме
 class GameOverlayDialog : public QDialog {
 public:
     GameOverlayDialog(const Inst &inst, QWidget *parent) : QDialog(parent) {
@@ -246,7 +243,6 @@ public:
         auto *vMain = new QVBoxLayout(this);
         vMain->setContentsMargins(16, 12, 16, 12);
 
-        // Верхняя панель (F5, Чат T, Пауза Esc) справа вверху
         auto *hTop = new QHBoxLayout();
         auto *info = new QLabel("Running: " + inst.name + " [" + inst.loader + "]");
         info->setStyleSheet("color:#8899A6; font-size:12px;");
@@ -259,3 +255,13 @@ public:
             b->setStyleSheet("background:rgba(255,255,255,40);border-radius:8px;color:white;font-weight:bold;");
             return b;
         };
+        auto *bF5 = mkTopBtn("F5");
+        auto *bChat = mkTopBtn("T");
+        auto *bEsc = mkTopBtn("||");
+        connect(bEsc, &QPushButton::clicked, this, &QDialog::accept);
+        hTop->addWidget(bF5);
+        hTop->addWidget(bChat);
+        hTop->addWidget(bEsc);
+        vMain->addLayout(hTop);
+
+        vMain->addStretch();
