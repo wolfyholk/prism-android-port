@@ -13,6 +13,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Checkout OpenSSL
+        uses: actions/checkout@v4
+        with:
+          repository: KDAB/android_openssl
+          path: openssl
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -40,9 +46,9 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.1.8937393
           export PATH="${{ steps.install-qt.outputs.qt-path }}/bin:${{ steps.install-qt.outputs.qt-path }}/../gcc_64/bin:$PATH"
-          git clone --depth=1 https://github.com /tmp/openssl
+          SSL_DIR="$PWD/openssl/ssl_3/arm64-v8a"
           mkdir build && cd build
-          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DANDROID_EXTRA_LIBS="/tmp/openssl/ssl_3/arm64-v8a/libcrypto_3.so;/tmp/openssl/ssl_3/arm64-v8a/libssl_3.so" ..
+          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DANDROID_EXTRA_LIBS="$SSL_DIR/libcrypto_3.so;$SSL_DIR/libssl_3.so" ..
           cmake --build . --target apk
 
       - name: Upload APK
