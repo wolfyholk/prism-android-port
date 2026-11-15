@@ -7,124 +7,97 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QSslConfiguration>
 #include <QProgressDialog>
 #include <QMessageBox>
-#include <QProcess>
 
 GameLauncher::GameLauncher(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent), net(nam) {}
 
 QString GameLauncher::selectJavaVersion(const QString &mcVer) {
-    // Автоматический выбор нужной версии Java как в оригинальном Prism Launcher
-    if (mcVer.startsWith("1.12") || mcVer.startsWith("1.8")) return "Java 8";
-    if (mcVer.startsWith("1.16")) return "Java 11";
+    if (mcVer.startsWith("26.")) return "Java 25+";
+    if (mcVer.startsWith("1.21") || mcVer == "1.20.5" || mcVer == "1.20.6") return "Java 21+";
     if (mcVer.startsWith("1.17") || mcVer.startsWith("1.18") ||
-        mcVer.startsWith("1.19") || mcVer.startsWith("1.20.1") ||
-        mcVer.startsWith("1.20.4")) return "Java 17";
-    return "Java 21"; // Для 1.20.5+, 1.21.x и 26.x
+        mcVer.startsWith("1.19") || mcVer.startsWith("1.20")) return "Java 17+";
+    return "Java 8+";
 }
 
 void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) {
-    QString instDir = cfg.dataDir + "/instances/" + cfg.instId;
     QString verDir = cfg.dataDir + "/versions/" + cfg.mcVer;
-    QString runtimeDir = cfg.dataDir + "/runtimes";
-    QDir().mkpath(instDir + "/mods");
+    QDir().mkpath(cfg.dataDir + "/instances/" + cfg.instId + "/mods");
     QDir().mkpath(verDir);
-    QDir().mkpath(runtimeDir);
 
-    QString jarPath = verDir + "/" + cfg.mcVer + ".jar";
+    QString jarPath = verDir + "/client.jar";
     if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-        // Клиент уже скачан — сразу переходим к запуску
         startJavaProcess(jarPath, cfg, parentUi);
     } else {
-        // Сначала скачиваем официальный клиент с серверов Mojang
         downloadVersionManifest(cfg, parentUi);
     }
 }
 
 void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog(
-        "Получение манифеста версии " + cfg.mcVer + " от Mojang...",
-        "Отмена", 0, 0, parentUi);
+    auto *dlg = new QProgressDialog("Поиск версии " + cfg.mcVer + "...", "Отмена", 0, 0, parentUi);
     dlg->setWindowModality(Qt::WindowModal);
     dlg->show();
 
-    QUrl manifestUrl("https://mojang.com");
-    auto *rep = net->get(QNetworkRequest(manifestUrl));
+    QNetworkRequest req(QUrl("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"));
+    auto *rep = net->get(req);
 
     connect(rep, &QNetworkReply::finished, [this, rep, dlg, cfg, parentUi]() {
-        dlg->close();
-        dlg->deleteLater();
+        dlg->close(); dlg->deleteLater();
         if (rep->error() != QNetworkReply::NoError) {
-            QMessageBox::warning(parentUi, "Ошибка сети",
-                "Не удалось получить список версий Mojang:\n" + rep->errorString());
+            QMessageBox::warning(parentUi, "Ошибка сети", rep->errorString());
             rep->deleteLater();
             return;
         }
-
-        auto doc = QJsonDocument::fromJson(rep->readAll());
+        auto arr = QJsonDocument::fromJson(rep->readAll()).object()["versions"].toArray();
         rep->deleteLater();
-        auto versions = doc.object()["versions"].toArray();
-        QString verJsonUrl;
 
-        for (const auto &v : versions) {
-            auto obj = v.toObject();
-            if (obj["id"].toString() == cfg.mcVer) {
-                verJsonUrl = obj["url"].toString();
+        QString verUrl;
+        for (const auto &v : arr) {
+            if (v.toObject()["id"].toString() == cfg.mcVer) {
+                verUrl = v.toObject()["url"].toString();
                 break;
             }
         }
-
-        if (verJsonUrl.isEmpty()) {
-            QMessageBox::warning(parentUi, "Ошибка",
-                "Версия " + cfg.mcVer + " не найдена в манифесте Mojang.");
+        if (verUrl.isEmpty()) {
+            QMessageBox::warning(parentUi, "Ошибка", "Версия " + cfg.mcVer + " не найдена в манифесте.");
             return;
         }
 
-        // Запрашиваем JSON конкретной версии для получения ссылки на client.jar
-        auto *verRep = net->get(QNetworkRequest(QUrl(verJsonUrl)));
-        connect(verRep, &QNetworkReply::finished, [this, verRep, cfg, parentUi]() {
-            if (verRep->error() != QNetworkReply::NoError) {
-                QMessageBox::warning(parentUi, "Ошибка", verRep->errorString());
-                verRep->deleteLater();
+        auto *vRep = net->get(QNetworkRequest(QUrl(verUrl)));
+        connect(vRep, &QNetworkReply::finished, [this, vRep, cfg, parentUi]() {
+            if (vRep->error() != QNetworkReply::NoError) {
+                QMessageBox::warning(parentUi, "Ошибка", vRep->errorString());
+                vRep->deleteLater();
                 return;
             }
-            auto vDoc = QJsonDocument::fromJson(verRep->readAll());
-            verRep->deleteLater();
-
-            QString clientUrl = vDoc.object()["downloads"].toObject()
-                                    ["client"].toObject()["url"].toString();
-            QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/" + cfg.mcVer + ".jar";
-            downloadClientJar(clientUrl, jarPath, cfg, parentUi);
+            auto doc = QJsonDocument::fromJson(vRep->readAll()).object();
+            vRep->deleteLater();
+            QString jarUrl = doc["downloads"].toObject()["client"].toObject()["url"].toString();
+            downloadClientJar(jarUrl, cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar", cfg, parentUi);
         });
     });
 }
 
-void GameLauncher::downloadClientJar(const QString &clientUrl, const QString &jarPath,
+void GameLauncher::downloadClientJar(const QString &url, const QString &jarPath,
                                      const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog(
-        "Загрузка Minecraft " + cfg.mcVer + " (client.jar)...",
-        "Отмена", 0, 100, parentUi);
+    auto *dlg = new QProgressDialog("Скачивание client.jar (" + cfg.mcVer + ")...", "Отмена", 0, 100, parentUi);
     dlg->setWindowModality(Qt::WindowModal);
     dlg->show();
 
-    auto *rep = net->get(QNetworkRequest(QUrl(clientUrl)));
-
-    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 recv, qint64 total) {
-        if (total > 0) {
-            dlg->setValue(static_cast<int>((recv * 100) / total));
-        }
+    auto *rep = net->get(QNetworkRequest(QUrl(url)));
+    connect(rep, &QNetworkReply::downloadProgress, [dlg](qint64 r, qint64 t) {
+        if (t > 0) dlg->setValue(int((r * 100) / t));
     });
 
     connect(rep, &QNetworkReply::finished, [this, rep, dlg, jarPath, cfg, parentUi]() {
-        dlg->close();
-        dlg->deleteLater();
+        dlg->close(); dlg->deleteLater();
         if (rep->error() != QNetworkReply::NoError) {
             QMessageBox::warning(parentUi, "Ошибка загрузки", rep->errorString());
             rep->deleteLater();
             return;
         }
-
         QFile f(jarPath);
         if (f.open(QIODevice::WriteOnly)) {
             f.write(rep->readAll());
@@ -137,17 +110,10 @@ void GameLauncher::downloadClientJar(const QString &clientUrl, const QString &ja
 
 void GameLauncher::startJavaProcess(const QString &jarPath, const LaunchConfig &cfg,
                                     QWidget *parentUi) {
-    QString neededJava = selectJavaVersion(cfg.mcVer);
-    QString javaBin = cfg.dataDir + "/runtimes/bin/java";
-    bool hasJava = QFile::exists(javaBin);
-
-    QString report =
-        "Сборка: " + cfg.instName + "\n" +
-        "Клиент: " + jarPath + " (Скачан!)\n" +
-        "Загрузчик: " + cfg.loader + " " + cfg.loaderVer + "\n" +
-        "Требуемая VM: " + neededJava + (hasJava ? " [Установлена]" : " [Не распакована]") + "\n" +
-        "Выделено RAM: " + QString::number(cfg.ramMb) + " МБ\n" +
-        "Никнейм: " + cfg.nick;
-
-    QMessageBox::information(parentUi, "Готово к запуску в JVM", report);
+    double mb = QFileInfo(jarPath).size() / (1024.0 * 1024.0);
+    QMessageBox::information(parentUi, "client.jar установлен!",
+        "Версия: " + cfg.mcVer + " (" + cfg.loader + ")\n" +
+        "Файл: " + jarPath + "\n" +
+        "Размер: " + QString::number(mb, 'f', 1) + " МБ\n" +
+        "Нужная Java: " + selectJavaVersion(cfg.mcVer));
 }
