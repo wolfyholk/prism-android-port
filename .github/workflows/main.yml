@@ -19,10 +19,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Qt 6.8 for Android
+      - name: Install Qt 6 for Android
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.1'
+          version: '6.8.*'
           host: 'linux'
           target: 'android'
           arch: 'android_arm64_v8a'
