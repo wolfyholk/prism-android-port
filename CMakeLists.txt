@@ -10,6 +10,8 @@ qt_standard_project_setup()
 qt_add_executable(PrismAndroidTest
     MANUAL_FINALIZATION
     main.cpp
+    GameLauncher.h
+    GameLauncher.cpp
 )
 
 target_link_libraries(PrismAndroidTest PRIVATE
