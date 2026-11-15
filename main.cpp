@@ -10,254 +10,252 @@
 #include <QFrame>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QDialog>
+#include <QComboBox>
+#include <QRadioButton>
+#include <QButtonGroup>
+#include <QLineEdit>
 #include <QStyleFactory>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QSvgRenderer>
+#include <QPainter>
+#include <QPixmap>
 
 struct Inst {
+    QString id;
     QString name;
-    QString ver;
-    QString cat;
-    QString col;
-    QString tag;
+    QString mcVer;
+    QString loader;
+    QString loaderVer;
+    QString group;
 };
 
-class PrismWin : public QMainWindow {
-public:
-    PrismWin() {
-        setWindowTitle("Prism Launcher 9.4");
-        qApp->setStyle(QStyleFactory::create("Fusion"));
-        QPalette p;
-        p.setColor(QPalette::Window, QColor(30, 30, 30));
-        p.setColor(QPalette::WindowText, Qt::white);
-        p.setColor(QPalette::Base, QColor(25, 25, 25));
-        p.setColor(QPalette::Text, Qt::white);
-        p.setColor(QPalette::Button, QColor(45, 45, 45));
-        p.setColor(QPalette::ButtonText, Qt::white);
-        qApp->setPalette(p);
+// Генератор оригинальной иконки Prism Launcher (как на картинке)
+static QPixmap makePrismIcon(int sz) {
+    QPixmap pm(sz, sz);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    double cx = sz / 2.0, cy = sz / 2.0, r = sz * 0.45;
+    QColor cols[8] = {
+        QColor("#DF5B6D"), QColor("#F48A5A"), QColor("#F5DF65"),
+        QColor("#78B88E"), QColor("#4C82C4"), QColor("#6C488E"),
+        QColor("#574336"), QColor("#7E5538")
+    };
+    // Верхний левый зеленый сектор и остальные 8 сегментов
+    p.setPen(Qt::NoPen);
+    for (int i = 0; i < 8; ++i) {
+        p.setBrush(cols[i]);
+        double a1 = -90 + i * 37.5;
+        p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2),
+                  int(-a1 * 16), int(-37.5 * 16));
+    }
+    p.setBrush(QColor("#92CD5E"));
+    p.drawPie(QRectF(cx - r, cy - r, r * 2, r * 2),
+              int(90 * 16), int(60 * 16));
+    // Белый внутренний куб
+    double ir = r * 0.48;
+    QPolygonF topF, leftF, rightF;
+    topF << QPointF(cx, cy - ir)
+         << QPointF(cx + ir * 0.86, cy - ir * 0.5)
+         << QPointF(cx, cy)
+         << QPointF(cx - ir * 0.86, cy - ir * 0.5);
+    leftF << QPointF(cx - ir * 0.86, cy - ir * 0.5)
+          << QPointF(cx, cy)
+          << QPointF(cx, cy + ir)
+          << QPointF(cx - ir * 0.86, cy + ir * 0.5);
+    rightF << QPointF(cx, cy)
+           << QPointF(cx + ir * 0.86, cy - ir * 0.5)
+           << QPointF(cx + ir * 0.86, cy + ir * 0.5)
+           << QPointF(cx, cy + ir);
+    p.setBrush(QColor("#FFFFFF")); p.drawPolygon(topF);
+    p.setBrush(QColor("#DCDCDC")); p.drawPolygon(leftF);
+    p.setBrush(QColor("#EAEAEA")); p.drawPolygon(rightF);
+    return pm;
+}
 
-        list = {
-            {"Fabric 1.16.5", "1.16.5", "Ungrouped", "#36C5F0", "F"},
-            {"Forge 1.12.2", "1.12.2", "Ungrouped", "#D93829", "TNT"},
-            {"NeoForge 1.21.1", "1.21.1", "Ungrouped", "#E0E0E0", "NF"},
-            {"Quilt 1.18.2", "1.18.2", "Ungrouped", "#F2C94C", "Q"},
-            {"Snapshot 26.1", "26.1", "Ungrouped", "#795548", "26.1"},
-            {"Vanilla 1.21.11", "1.21.11", "Ungrouped", "#6E7F80", "MC"},
-            {"All the Mods 10", "1.21.1", "Modpack", "#F2994A", "ATM"},
-            {"Better MC", "1.20.1", "Modpack", "#56CCF2", "BMC"},
-            {"Cobblemon", "1.20.1", "Modpack", "#EB5757", "CB"},
-            {"SkyFactory 4", "1.12.2", "Modpack", "#6FCF97", "SF4"},
-            {"Pixelmon", "1.16.5", "Modpack", "#BB6BD9", "PM"},
-            {"Additive", "1.21.4", "Vanilla-like", "#FF7675", "U"},
-            {"Adrenaline", "1.21.4", "Vanilla-like", "#A3CB38", "AD"},
-            {"Fabulously Opt.", "1.21.4", "Vanilla-like", "#C4B581", "FO"}
+// Диалог создания сборки с официальными версиями и загрузчиками
+class AddInstDialog : public QDialog {
+public:
+    QString outName, outMc, outLoader, outLoaderVer, outGroup;
+
+    AddInstDialog(QNetworkAccessManager *nam, QWidget *parent)
+        : QDialog(parent), net(nam) {
+        setWindowTitle("Add Instance - Prism Launcher");
+        resize(560, 420);
+        auto *lay = new QVBoxLayout(this);
+
+        auto *hName = new QHBoxLayout();
+        hName->addWidget(new QLabel("Name:"));
+        edName = new QLineEdit("1.21.4");
+        hName->addWidget(edName);
+        lay->addLayout(hName);
+
+        auto *hGrp = new QHBoxLayout();
+        hGrp->addWidget(new QLabel("Group:"));
+        edGroup = new QLineEdit("Ungrouped");
+        hGrp->addWidget(edGroup);
+        lay->addLayout(hGrp);
+
+        lay->addWidget(new QLabel("Minecraft Version (Official Mojang):"));
+        cbMc = new QComboBox();
+        cbMc->addItems({"1.21.4", "1.21.1", "1.20.4", "1.20.1",
+                        "1.19.2", "1.18.2", "1.16.5", "1.12.2"});
+        lay->addWidget(cbMc);
+
+        // Загрузка реального списка версий с серверов Mojang
+        QNetworkRequest req(QUrl(
+            "https://mojang.com"));
+        auto *rep = net->get(req);
+        connect(rep, &QNetworkReply::finished, [this, rep]() {
+            if (rep->error() == QNetworkReply::NoError) {
+                auto doc = QJsonDocument::fromJson(rep->readAll());
+                auto arr = doc.object()["versions"].toArray();
+                if (!arr.isEmpty()) {
+                    cbMc->clear();
+                    for (int i = 0; i < arr.size() && i < 60; ++i) {
+                        auto obj = arr[i].toObject();
+                        if (obj["type"].toString() == "release") {
+                            cbMc->addItem(obj["id"].toString());
+                        }
+                    }
+                }
+            }
+            rep->deleteLater();
+        });
+
+        lay->addWidget(new QLabel("Mod Loader (Original):"));
+        auto *hLoad = new QHBoxLayout();
+        grpLoader = new QButtonGroup(this);
+        QStringList loaders = {"Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"};
+        for (int i = 0; i < loaders.size(); ++i) {
+            auto *rb = new QRadioButton(loaders[i]);
+            if (i == 0) rb->setChecked(true);
+            grpLoader->addButton(rb, i);
+            hLoad->addWidget(rb);
+        }
+        lay->addLayout(hLoad);
+
+        lay->addWidget(new QLabel("Loader Version:"));
+        cbLoaderVer = new QComboBox();
+        cbLoaderVer->addItem("None (Vanilla)");
+        lay->addWidget(cbLoaderVer);
+
+        auto updateNameAndLoader = [this]() {
+            QString mc = cbMc->currentText();
+            QString ld = grpLoader->checkedButton()->text();
+            edName->setText(ld == "Vanilla" ? mc : (ld + " " + mc));
+            fetchLoaderVersions(mc, ld);
         };
 
-        auto *root = new QWidget(this);
-        auto *vMain = new QVBoxLayout(root);
-        vMain->setContentsMargins(0, 0, 0, 0);
-        vMain->setSpacing(0);
+        connect(cbMc, &QComboBox::currentTextChanged, updateNameAndLoader);
+        connect(grpLoader, &QButtonGroup::idClicked, updateNameAndLoader);
 
-        // Верхняя панель
-        auto *top = new QWidget();
-        top->setFixedHeight(44);
-        top->setStyleSheet("background:#2B2B2B;");
-        auto *hTop = new QHBoxLayout(top);
-        hTop->setContentsMargins(8, 4, 8, 4);
-
-        auto *bAdd = topBtn("+ Add Instance");
-        auto *bFld = topBtn("Folders");
-        auto *bSet = topBtn("Settings");
-        auto *bHlp = topBtn("Help");
-        auto *bAcc = topBtn("Accounts");
-
-        connect(bAdd, &QPushButton::clicked, [this]() {
-            bool ok;
-            QString n = QInputDialog::getText(
-                this, "Add", "Name:",
-                QLineEdit::Normal, "New 1.21.4", &ok);
-            if (ok && !n.isEmpty()) {
-                list.append({n, "1.21.4", "Ungrouped", "#55EFC4", "NEW"});
-                buildGrid(n);
-            }
+        auto *hBtns = new QHBoxLayout();
+        auto *bOk = new QPushButton("OK");
+        auto *bCancel = new QPushButton("Cancel");
+        bOk->setStyleSheet("background:#2B7CD3;color:#fff;padding:8px 20px;font-weight:bold;");
+        connect(bOk, &QPushButton::clicked, [this]() {
+            outName = edName->text().trimmed();
+            outMc = cbMc->currentText();
+            outLoader = grpLoader->checkedButton()->text();
+            outLoaderVer = cbLoaderVer->currentText();
+            outGroup = edGroup->text().trimmed();
+            if (outGroup.isEmpty()) outGroup = "Ungrouped";
+            if (!outName.isEmpty()) accept();
         });
-        connect(bSet, &QPushButton::clicked, [this]() {
-            QMessageBox::information(this, "Settings", "Java & Render");
-        });
-        connect(bAcc, &QPushButton::clicked, [this]() {
-            QMessageBox::information(this, "Accounts", "Microsoft / Offline");
-        });
-
-        hTop->addWidget(bAdd);
-        hTop->addWidget(bFld);
-        hTop->addWidget(bSet);
-        hTop->addWidget(bHlp);
-        hTop->addStretch();
-        hTop->addWidget(bAcc);
-        vMain->addWidget(top);
-
-        // Центр
-        auto *hMid = new QHBoxLayout();
-        hMid->setContentsMargins(0, 0, 0, 0);
-        hMid->setSpacing(0);
-
-        auto *scroll = new QScrollArea();
-        scroll->setWidgetResizable(true);
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setStyleSheet("background:#1E1E1E;");
-
-        gridBox = new QWidget();
-        gridBox->setStyleSheet("background:#1E1E1E;");
-        gridLay = new QVBoxLayout(gridBox);
-        gridLay->setContentsMargins(12, 10, 12, 10);
-        scroll->setWidget(gridBox);
-        hMid->addWidget(scroll, 1);
-
-        // Правая панель
-        auto *side = new QWidget();
-        side->setFixedWidth(180);
-        side->setStyleSheet("background:#252525;");
-        auto *vSide = new QVBoxLayout(side);
-        vSide->setContentsMargins(10, 14, 10, 10);
-        vSide->setSpacing(4);
-
-        sIcon = new QLabel("MC");
-        sIcon->setFixedSize(64, 64);
-        sIcon->setAlignment(Qt::AlignCenter);
-        sIcon->setStyleSheet("background:#6E7F80;border-radius:8px;color:#fff;font-weight:bold;");
-
-        sName = new QLabel("Vanilla 1.21.11");
-        sName->setAlignment(Qt::AlignCenter);
-        sName->setWordWrap(true);
-        sName->setStyleSheet("color:#EAEAEA;font-weight:bold;");
-
-        vSide->addWidget(sIcon, 0, Qt::AlignHCenter);
-        vSide->addWidget(sName);
-
-        auto *bPlay = sideBtn("> Launch", true);
-        auto *bKill = sideBtn("x Kill", false);
-        bKill->setEnabled(false);
-
-        connect(bPlay, &QPushButton::clicked, [this]() {
-            QMessageBox::information(this, "Launch", "Start: " + sName->text());
-        });
-
-        vSide->addWidget(bPlay);
-        vSide->addWidget(bKill);
-        vSide->addWidget(sideBtn("Edit", false));
-        vSide->addWidget(sideBtn("Change Group", false));
-        vSide->addWidget(sideBtn("Folder", false));
-        vSide->addWidget(sideBtn("Export", false));
-        vSide->addWidget(sideBtn("Copy", false));
-        vSide->addWidget(sideBtn("Delete", false));
-        vSide->addWidget(sideBtn("Shortcut", false));
-        vSide->addStretch();
-
-        hMid->addWidget(side);
-        vMain->addLayout(hMid, 1);
-
-        // Низ
-        auto *bot = new QWidget();
-        bot->setFixedHeight(26);
-        bot->setStyleSheet("background:#252525;");
-        auto *hBot = new QHBoxLayout(bot);
-        hBot->setContentsMargins(10, 0, 10, 0);
-
-        stLeft = new QLabel("Minecraft 1.21.11");
-        stLeft->setStyleSheet("color:#BBB;font-size:11px;");
-        auto *stRight = new QLabel("Total playtime: 0s");
-        stRight->setStyleSheet("color:#BBB;font-size:11px;");
-
-        hBot->addWidget(stLeft);
-        hBot->addStretch();
-        hBot->addWidget(stRight);
-        vMain->addWidget(bot);
-
-        setCentralWidget(root);
-        buildGrid("Vanilla 1.21.11");
+        connect(bCancel, &QPushButton::clicked, this, &QDialog::reject);
+        hBtns->addStretch();
+        hBtns->addWidget(bOk);
+        hBtns->addWidget(bCancel);
+        lay->addLayout(hBtns);
     }
 
 private:
-    QList<Inst> list;
-    QWidget *gridBox;
-    QVBoxLayout *gridLay;
-    QLabel *sIcon;
-    QLabel *sName;
-    QLabel *stLeft;
+    QNetworkAccessManager *net;
+    QLineEdit *edName, *edGroup;
+    QComboBox *cbMc, *cbLoaderVer;
+    QButtonGroup *grpLoader;
 
-    QPushButton* topBtn(const QString &t) {
-        auto *b = new QPushButton(t);
-        b->setStyleSheet("background:transparent;color:#EAEAEA;border:none;padding:6px 8px;");
-        return b;
-    }
-
-    QPushButton* sideBtn(const QString &t, bool main) {
-        auto *b = new QPushButton(t);
-        if (main) {
-            b->setStyleSheet("text-align:left;background:#2E3436;color:#FFF;font-weight:bold;padding:8px;border-radius:4px;");
-        } else {
-            b->setStyleSheet("text-align:left;background:transparent;color:#EAEAEA;border:none;padding:6px 8px;");
+    void fetchLoaderVersions(const QString &mc, const QString &ld) {
+        cbLoaderVer->clear();
+        if (ld == "Vanilla") {
+            cbLoaderVer->addItem("None");
+            return;
         }
-        return b;
-    }
-
-    void buildGrid(const QString &act) {
-        QLayoutItem *c;
-        while ((c = gridLay->takeAt(0)) != nullptr) {
-            if (c->widget()) delete c->widget();
-            delete c;
+        cbLoaderVer->addItem("Loading...");
+        QUrl url;
+        if (ld == "Fabric") {
+            url = QUrl("https://fabricmc.net" + mc);
+        } else if (ld == "Quilt") {
+            url = QUrl("https://quiltmc.org" + mc);
+        } else if (ld == "NeoForge") {
+            url = QUrl("https://neoforged.net");
+        } else if (ld == "Forge") {
+            url = QUrl("https://minecraftforge.net");
         }
-        QStringList cats = {"Ungrouped", "Modpack", "Vanilla-like"};
-        for (const QString &cat : cats) {
-            auto *hdr = new QLabel("v  " + cat);
-            hdr->setStyleSheet("color:#CCC;font-weight:bold;");
-            gridLay->addWidget(hdr);
 
-            auto *w = new QWidget();
-            auto *g = new QGridLayout(w);
-            g->setAlignment(Qt::AlignLeft);
-            int col = 0, row = 0;
-
-            for (const auto &it : list) {
-                if (it.cat != cat) continue;
-                bool sel = (it.name == act);
-                auto *tile = new QPushButton();
-                tile->setFixedSize(92, 98);
-                auto *tl = new QVBoxLayout(tile);
-                tl->setContentsMargins(4, 6, 4, 4);
-
-                auto *ic = new QLabel(it.tag);
-                ic->setFixedSize(48, 48);
-                ic->setAlignment(Qt::AlignCenter);
-                ic->setStyleSheet("background:" + it.col + ";border-radius:6px;color:#111;font-weight:bold;");
-
-                auto *lb = new QLabel(it.name);
-                lb->setAlignment(Qt::AlignCenter);
-                lb->setWordWrap(true);
-                lb->setStyleSheet(sel ? "background:#2B7CD3;color:#fff;font-size:11px;" : "color:#EAEAEA;font-size:11px;");
-
-                tl->addWidget(ic, 0, Qt::AlignHCenter);
-                tl->addWidget(lb);
-                tile->setStyleSheet(sel ? "background:#223B59;border:1px solid #2B7CD3;border-radius:6px;" : "background:transparent;border:none;");
-
-                connect(tile, &QPushButton::clicked, [this, it]() {
-                    sName->setText(it.name);
-                    sIcon->setText(it.tag);
-                    sIcon->setStyleSheet("background:" + it.col + ";border-radius:8px;color:#111;font-weight:bold;");
-                    stLeft->setText("Minecraft " + it.ver);
-                    buildGrid(it.name);
-                });
-
-                g->addWidget(tile, row, col++);
-                if (col >= 5) { col = 0; row++; }
+        auto *rep = net->get(QNetworkRequest(url));
+        connect(rep, &QNetworkReply::finished, [this, rep, ld, mc]() {
+            cbLoaderVer->clear();
+            if (rep->error() == QNetworkReply::NoError) {
+                auto doc = QJsonDocument::fromJson(rep->readAll());
+                if (ld == "Fabric" || ld == "Quilt") {
+                    auto arr = doc.array();
+                    for (int i = 0; i < arr.size() && i < 15; ++i) {
+                        auto v = arr[i].toObject()["loader"].toObject()["version"].toString();
+                        if (!v.isEmpty()) cbLoaderVer->addItem(v);
+                    }
+                } else if (ld == "NeoForge") {
+                    auto arr = doc.object()["versions"].toArray();
+                    for (int i = arr.size() - 1; i >= 0 && cbLoaderVer->count() < 15; --i) {
+                        cbLoaderVer->addItem(arr[i].toString());
+                    }
+                } else if (ld == "Forge") {
+                    auto promos = doc.object()["promos"].toObject();
+                    if (promos.contains(mc + "-recommended"))
+                        cbLoaderVer->addItem(promos[mc + "-recommended"].toString());
+                    if (promos.contains(mc + "-latest"))
+                        cbLoaderVer->addItem(promos[mc + "-latest"].toString());
+                }
             }
-            gridLay->addWidget(w);
-        }
-        gridLay->addStretch();
+            if (cbLoaderVer->count() == 0)
+                cbLoaderVer->addItem("Official " + ld + " (" + mc + ")");
+            rep->deleteLater();
+        });
     }
 };
 
-int main(int argc, char *argv[]) {
-    QApplication app(argc, argv);
-    PrismWin w;
-    w.show();
-    return app.exec();
-}
+// Игровой оверлей с сенсорным управлением как на вашей схеме
+class GameOverlayDialog : public QDialog {
+public:
+    GameOverlayDialog(const Inst &inst, QWidget *parent) : QDialog(parent) {
+        setWindowTitle("Minecraft " + inst.mcVer);
+        setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+        showFullScreen();
+        setStyleSheet("background:#101820; color:white;");
+
+        auto *vMain = new QVBoxLayout(this);
+        vMain->setContentsMargins(16, 12, 16, 12);
+
+        // Верхняя панель (F5, Чат T, Пауза Esc) справа вверху
+        auto *hTop = new QHBoxLayout();
+        auto *info = new QLabel("Running: " + inst.name + " [" + inst.loader + "]");
+        info->setStyleSheet("color:#8899A6; font-size:12px;");
+        hTop->addWidget(info);
+        hTop->addStretch();
+
+        auto mkTopBtn = [](const QString &t) {
+            auto *b = new QPushButton(t);
+            b->setFixedSize(44, 44);
+            b->setStyleSheet("background:rgba(255,255,255,40);border-radius:8px;color:white;font-weight:bold;");
+            return b;
+        };
