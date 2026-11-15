@@ -5,46 +5,16 @@
 #include <QPushButton>
 #include <QListWidget>
 #include <QInputDialog>
-#include <QMessageBox>
 #include <QDir>
 #include <QFile>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QJniObject>
+#include "StorageManager.h"
 #include "GameLauncher.h"
 
 struct Inst { QString id, name, mc, ld; };
-
-static bool checkAndInitStorage(const QString &baseDir, QWidget *parent, bool showPrompt) {
-    bool isMgr = QJniObject::callStaticMethod<jboolean>(
-        "android/os/Environment", "isExternalStorageManager", "()Z");
-
-    if (!isMgr) {
-        if (showPrompt) {
-            QMessageBox::information(parent, "Доступ к хранилищу",
-                "Включите управление хранилищем: зайдите в настройки и разрешения приложения, "
-                "затем разрешите управление хранилищем.");
-        }
-        return false;
-    }
-
-    QStringList dirs = {
-        "instances", "libraries", "assets", "icons",
-        "java", "logs", "mods", "themes", "translations"
-    };
-    for (const QString &d : dirs) {
-        QDir().mkpath(baseDir + "/" + d);
-    }
-
-    QFile cfg(baseDir + "/prismlauncher.cfg");
-    if (!cfg.exists() && cfg.open(QIODevice::WriteOnly)) {
-        cfg.write("[General]\nConfigVersion=1.2\nUseNativeOpenAL=true\n");
-        cfg.close();
-    }
-    return true;
-}
 
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
@@ -53,7 +23,6 @@ int main(int argc, char *argv[]) {
     w.setStyleSheet("background:#1E1E1E;color:#FFF;");
 
     QString dir = "/storage/emulated/0/PrismLauncher";
-
     auto *net = new QNetworkAccessManager(&w);
     auto *gl = new GameLauncher(net, &w);
     QList<Inst> list;
@@ -88,7 +57,7 @@ int main(int argc, char *argv[]) {
         for (auto &i : list) lw->addItem(i.name + "  [" + i.ld + " " + i.mc + "]");
     };
 
-    auto loadFromDisk = [&]() {
+    auto load = [&]() {
         list.clear();
         QFile f(dir + "/instances.json");
         if (f.open(QIODevice::ReadOnly)) {
@@ -102,13 +71,11 @@ int main(int argc, char *argv[]) {
     };
 
     w.show();
-    if (checkAndInitStorage(dir, &w, true)) {
-        loadFromDisk();
-    }
+    if (StorageManager::ensureReady(dir, &w)) load();
 
     QObject::connect(bAdd, &QPushButton::clicked, [&]() {
-        if (!checkAndInitStorage(dir, &w, true)) return;
-        if (list.isEmpty()) loadFromDisk();
+        if (!StorageManager::ensureReady(dir, &w)) return;
+        if (list.isEmpty()) load();
         QString mc = QInputDialog::getText(&w, "Add", "Версия (напр. 1.21.4):", QLineEdit::Normal, "1.21.4");
         if (mc.isEmpty()) return;
         QStringList lds = {"Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"};
@@ -121,7 +88,7 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(bDel, &QPushButton::clicked, [&]() {
-        if (!checkAndInitStorage(dir, &w, true)) return;
+        if (!StorageManager::ensureReady(dir, &w)) return;
         int r = lw->currentRow();
         if (r >= 0) {
             QDir(dir + "/instances/" + list[r].id).removeRecursively();
@@ -130,7 +97,7 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(bRun, &QPushButton::clicked, [&]() {
-        if (!checkAndInitStorage(dir, &w, true)) return;
+        if (!StorageManager::ensureReady(dir, &w)) return;
         int r = lw->currentRow();
         if (r >= 0) {
             gl->prepareAndLaunch({list[r].id, list[r].name, list[r].mc, list[r].ld, "latest", "Player", dir, 2048}, &w);
