@@ -17,7 +17,7 @@ target_link_libraries(PrismAndroidTest PRIVATE Qt6::Widgets)
 set_target_properties(PrismAndroidTest PROPERTIES
     QT_ANDROID_PACKAGE_NAME "org.prism.androidtest"
     QT_ANDROID_MIN_SDK_VERSION "26"
-    QT_ANDROID_TARGET_SDK_VERSION "33"
+    QT_ANDROID_TARGET_SDK_VERSION "34"
 )
 
 qt_finalize_executable(PrismAndroidTest)
