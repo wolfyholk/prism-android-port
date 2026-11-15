@@ -43,10 +43,11 @@ jobs:
       - name: Download ARM64 Java Runtime & GL4ES Engine
         run: |
           mkdir -p runtime_libs
-          curl -L -o jre21.tar.xz "https://github.com" || true
-          if [ -s jre21.tar.xz ]; then
-            mkdir -p jre21 && tar -xf jre21.tar.xz -C jre21
-            find jre21 -name "*.so" -exec cp {} runtime_libs/ \;
+          curl -fSL -o jre21.tar.xz "https://github.com" || true
+          if [ -f jre21.tar.xz ]; then
+            mkdir -p jre21
+            tar -xf jre21.tar.xz -C jre21 || true
+            find jre21 -name "*.so" -exec cp {} runtime_libs/ \; || true
           fi
 
       - name: Build APK
