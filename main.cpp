@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include "StorageManager.h"
 #include "AccountManager.h"
+#include "SkinManager.h"
 #include "GameLauncher.h"
 
 struct Inst { QString id, name, mc, ld; };
@@ -35,6 +36,7 @@ int main(int argc, char *argv[]) {
     auto *bAdd = new QPushButton("+ Add Instance");
     auto *bDel = new QPushButton("Delete");
     auto *bAcc = new QPushButton("Accounts (" + curAcc.name + ")");
+    auto *bSkin = new QPushButton("Skin");
     auto *bRun = new QPushButton("> Launch");
     bRun->setStyleSheet("background:#2B7CD3;font-weight:bold;padding:8px;");
 
@@ -42,6 +44,7 @@ int main(int argc, char *argv[]) {
     hl->addWidget(bDel);
     hl->addStretch();
     hl->addWidget(bAcc);
+    hl->addWidget(bSkin);
     hl->addWidget(bRun);
     vl->addLayout(hl);
 
@@ -90,6 +93,11 @@ int main(int argc, char *argv[]) {
         if (!StorageManager::ensureReady(dir, &w)) return;
         curAcc = AccountManager::openDialog(dir, net, &w);
         bAcc->setText("Accounts (" + curAcc.name + ")");
+    });
+
+    QObject::connect(bSkin, &QPushButton::clicked, [&]() {
+        if (!StorageManager::ensureReady(dir, &w)) return;
+        SkinManager::openSkinDialog(dir, curAcc, net, &w);
     });
 
     QObject::connect(bAdd, &QPushButton::clicked, [&]() {
