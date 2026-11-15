@@ -25,18 +25,15 @@ QString GameLauncher::selectJavaVersion(const QString &mcVer) {
 void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *parentUi) {
     QString verDir = cfg.dataDir + "/versions/" + cfg.mcVer;
     QDir().mkpath(cfg.dataDir + "/instances/" + cfg.instId + "/mods");
+    QDir().mkpath(cfg.dataDir + "/libraries");
     QDir().mkpath(verDir);
 
-    QString jarPath = verDir + "/client.jar";
-    if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
-        startJavaProcess(jarPath, cfg, parentUi);
-    } else {
-        downloadVersionManifest(cfg, parentUi);
-    }
+    // Всегда проверяем манифест версии, чтобы докачать все библиотеки libraries/*.jar
+    downloadVersionManifest(cfg, parentUi);
 }
 
 void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *parentUi) {
-    auto *dlg = new QProgressDialog("Поиск версии " + cfg.mcVer + "...", "Отмена", 0, 0, parentUi);
+    auto *dlg = new QProgressDialog("Проверка манифеста " + cfg.mcVer + "...", "Отмена", 0, 0, parentUi);
     dlg->setWindowModality(Qt::WindowModal);
     dlg->show();
 
@@ -61,7 +58,7 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *par
             }
         }
         if (verUrl.isEmpty()) {
-            QMessageBox::warning(parentUi, "Ошибка", "Версия " + cfg.mcVer + " не найдена в манифесте.");
+            QMessageBox::warning(parentUi, "Ошибка", "Версия " + cfg.mcVer + " не найдена.");
             return;
         }
 
@@ -72,11 +69,97 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *par
                 vRep->deleteLater();
                 return;
             }
-            auto doc = QJsonDocument::fromJson(vRep->readAll()).object();
+            QByteArray rawJson = vRep->readAll();
             vRep->deleteLater();
-            QString jarUrl = doc["downloads"].toObject()["client"].toObject()["url"].toString();
-            downloadClientJar(jarUrl, cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar", cfg, parentUi);
+            parseAndDownloadLibraries(rawJson, cfg, parentUi);
         });
+    });
+}
+
+void GameLauncher::parseAndDownloadLibraries(const QByteArray &verJsonBytes,
+                                             const LaunchConfig &cfg, QWidget *parentUi) {
+    auto doc = QJsonDocument::fromJson(verJsonBytes).object();
+    QString jarUrl = doc["downloads"].toObject()["client"].toObject()["url"].toString();
+
+    libQueue.clear();
+    auto libs = doc["libraries"].toArray();
+    for (const auto &item : libs) {
+        auto libObj = item.toObject();
+        // Пропускаем нативные библиотеки для Windows/macOS
+        if (libObj.contains("rules")) {
+            bool allowLinux = false;
+            for (const auto &r : libObj["rules"].toArray()) {
+                auto ro = r.toObject();
+                QString osName = ro["os"].toObject()["name"].toString();
+                if (ro["action"].toString() == "allow" && (osName.isEmpty() || osName == "linux")) {
+                    allowLinux = true;
+                }
+            }
+            if (!allowLinux) continue;
+        }
+
+        auto art = libObj["downloads"].toObject()["artifact"].toObject();
+        QString url = art["url"].toString();
+        QString path = art["path"].toString();
+        if (!url.isEmpty() && !path.isEmpty()) {
+            QString localPath = cfg.dataDir + "/libraries/" + path;
+            if (!QFile::exists(localPath) || QFileInfo(localPath).size() == 0) {
+                libQueue.append(qMakePair(url, localPath));
+            }
+        }
+    }
+
+    totalLibs = libQueue.size();
+    if (totalLibs == 0) {
+        // Все библиотеки уже скачаны — проверяем client.jar
+        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar";
+        if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
+            startJavaProcess(jarPath, cfg, parentUi);
+        } else {
+            downloadClientJar(jarUrl, jarPath, cfg, parentUi);
+        }
+        return;
+    }
+
+    auto *dlg = new QProgressDialog("Загрузка библиотек (0 / " + QString::number(totalLibs) + ")...",
+                                    "Отмена", 0, totalLibs, parentUi);
+    dlg->setWindowModality(Qt::WindowModal);
+    dlg->show();
+    downloadNextLibrary(jarUrl, cfg, parentUi, dlg);
+}
+
+void GameLauncher::downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg,
+                                       QWidget *parentUi, QProgressDialog *dlg) {
+    if (dlg->wasCanceled() || libQueue.isEmpty()) {
+        dlg->close();
+        dlg->deleteLater();
+        QString jarPath = cfg.dataDir + "/versions/" + cfg.mcVer + "/client.jar";
+        if (QFile::exists(jarPath) && QFileInfo(jarPath).size() > 1000000) {
+            startJavaProcess(jarPath, cfg, parentUi);
+        } else {
+            downloadClientJar(jarUrl, jarPath, cfg, parentUi);
+        }
+        return;
+    }
+
+    auto next = libQueue.takeFirst();
+    int done = totalLibs - libQueue.size();
+    dlg->setValue(done);
+    dlg->setLabelText("Загрузка библиотек (" + QString::number(done) + " / " +
+                      QString::number(totalLibs) + "):\n" + QFileInfo(next.second).fileName());
+
+    QDir().mkpath(QFileInfo(next.second).absolutePath());
+    auto *rep = net->get(QNetworkRequest(QUrl(next.first)));
+    connect(rep, &QNetworkReply::finished, [this, rep, next, jarUrl, cfg, parentUi, dlg]() {
+        if (rep->error() == QNetworkReply::NoError) {
+            QFile f(next.second);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(rep->readAll());
+                f.close();
+            }
+        }
+        rep->deleteLater();
+        downloadNextLibrary(jarUrl, cfg, parentUi, dlg);
     });
 }
 
@@ -111,10 +194,11 @@ void GameLauncher::downloadClientJar(const QString &url, const QString &jarPath,
 void GameLauncher::startJavaProcess(const QString &jarPath, const LaunchConfig &cfg,
                                     QWidget *parentUi) {
     double mb = QFileInfo(jarPath).size() / (1024.0 * 1024.0);
-    QMessageBox::information(parentUi, "client.jar установлен!",
+    QMessageBox::information(parentUi, "Библиотеки и клиент готовы!",
+        "Аккаунт: " + cfg.nick + " (" + cfg.accType + ")\n" +
         "Версия: " + cfg.mcVer + " (" + cfg.loader + ")\n" +
-        "Файл: " + jarPath + "\n" +
-        "Размер: " + QString::number(mb, 'f', 1) + " МБ\n" +
+        "Библиотеки: скачаны в libraries/\n" +
+        "Клиент: " + QString::number(mb, 'f', 1) + " МБ\n" +
         "Нужная Java: " + selectJavaVersion(cfg.mcVer));
 
     TouchOverlay overlay(cfg.mcVer, parentUi);
