@@ -17,22 +17,19 @@
 
 struct Inst { QString id, name, mc, ld; };
 
-static void requestStorageAndInit(const QString &baseDir) {
-    // Запрос системного разрешения "Доступ ко всем файлам" на Android 11+
+static bool checkAndInitStorage(const QString &baseDir, QWidget *parent, bool showPrompt) {
     bool isMgr = QJniObject::callStaticMethod<jboolean>(
         "android/os/Environment", "isExternalStorageManager", "()Z");
+
     if (!isMgr) {
-        QJniObject act = QNativeInterface::QAndroidApplication::context();
-        QJniObject pkg = QJniObject::fromString("package:org.prism.androidtest");
-        QJniObject uri = QJniObject::callStaticObjectMethod(
-            "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", pkg.object<jstring>());
-        QJniObject action = QJniObject::fromString("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION");
-        QJniObject intent("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V",
-                          action.object<jstring>(), uri.object());
-        act.callMethod<void>("startActivity", "(Landroid/content/Intent;)V", intent.object());
+        if (showPrompt) {
+            QMessageBox::information(parent, "Доступ к хранилищу",
+                "Включите управление хранилищем: зайдите в настройки и разрешения приложения, "
+                "затем разрешите управление хранилищем.");
+        }
+        return false;
     }
 
-    // Создание оригинальной структуры папок Prism Launcher в корне устройства
     QStringList dirs = {
         "instances", "libraries", "assets", "icons",
         "java", "logs", "mods", "themes", "translations"
@@ -46,6 +43,7 @@ static void requestStorageAndInit(const QString &baseDir) {
         cfg.write("[General]\nConfigVersion=1.2\nUseNativeOpenAL=true\n");
         cfg.close();
     }
+    return true;
 }
 
 int main(int argc, char *argv[]) {
@@ -55,7 +53,6 @@ int main(int argc, char *argv[]) {
     w.setStyleSheet("background:#1E1E1E;color:#FFF;");
 
     QString dir = "/storage/emulated/0/PrismLauncher";
-    requestStorageAndInit(dir);
 
     auto *net = new QNetworkAccessManager(&w);
     auto *gl = new GameLauncher(net, &w);
@@ -91,17 +88,27 @@ int main(int argc, char *argv[]) {
         for (auto &i : list) lw->addItem(i.name + "  [" + i.ld + " " + i.mc + "]");
     };
 
-    QFile f(dir + "/instances.json");
-    if (f.open(QIODevice::ReadOnly)) {
-        for (auto v : QJsonDocument::fromJson(f.readAll()).array()) {
-            auto o = v.toObject();
-            list.append({o["id"].toString(), o["n"].toString(), o["m"].toString(), o["l"].toString()});
+    auto loadFromDisk = [&]() {
+        list.clear();
+        QFile f(dir + "/instances.json");
+        if (f.open(QIODevice::ReadOnly)) {
+            for (auto v : QJsonDocument::fromJson(f.readAll()).array()) {
+                auto o = v.toObject();
+                list.append({o["id"].toString(), o["n"].toString(), o["m"].toString(), o["l"].toString()});
+            }
+            f.close();
         }
-        f.close(); redraw();
+        redraw();
+    };
+
+    w.show();
+    if (checkAndInitStorage(dir, &w, true)) {
+        loadFromDisk();
     }
 
     QObject::connect(bAdd, &QPushButton::clicked, [&]() {
-        requestStorageAndInit(dir);
+        if (!checkAndInitStorage(dir, &w, true)) return;
+        if (list.isEmpty()) loadFromDisk();
         QString mc = QInputDialog::getText(&w, "Add", "Версия (напр. 1.21.4):", QLineEdit::Normal, "1.21.4");
         if (mc.isEmpty()) return;
         QStringList lds = {"Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"};
@@ -114,6 +121,7 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(bDel, &QPushButton::clicked, [&]() {
+        if (!checkAndInitStorage(dir, &w, true)) return;
         int r = lw->currentRow();
         if (r >= 0) {
             QDir(dir + "/instances/" + list[r].id).removeRecursively();
@@ -122,13 +130,12 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(bRun, &QPushButton::clicked, [&]() {
+        if (!checkAndInitStorage(dir, &w, true)) return;
         int r = lw->currentRow();
         if (r >= 0) {
-            requestStorageAndInit(dir);
             gl->prepareAndLaunch({list[r].id, list[r].name, list[r].mc, list[r].ld, "latest", "Player", dir, 2048}, &w);
         }
     });
 
-    w.show();
     return a.exec();
 }
