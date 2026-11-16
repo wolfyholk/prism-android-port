@@ -30,9 +30,8 @@ jobs:
           QT_DIR="/home/runner/work/prism-android-port/Qt/6.6.3/android_arm64_v8a"
           export PATH="$QT_DIR/bin:/home/runner/work/prism-android-port/Qt/6.6.3/gcc_64/bin:$PATH"
           cp $(find "$QT_DIR" -name AndroidManifest.xml | head -n 1) android_pkg/AndroidManifest.xml
-          sed -i 's|<!-- %%INSERT_PERMISSIONS -->|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><!-- %%INSERT_PERMISSIONS -->|' android_pkg/AndroidManifest.xml
+          sed -i 's|<application|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><application android:icon="@mipmap/ic_launcher"|' android_pkg/AndroidManifest.xml
           sed -i 's|-- %%INSERT_APP_NAME%% --|Prism Launcher|g' android_pkg/AndroidManifest.xml
-          sed -i 's|<application|<application android:icon="@mipmap/ic_launcher"|' android_pkg/AndroidManifest.xml
           PKG_DIR="$PWD/android_pkg"
           mkdir build && cd build
           qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DQT_ANDROID_PACKAGE_SOURCE_DIR="$PKG_DIR" ..
