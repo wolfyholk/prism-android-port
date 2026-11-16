@@ -14,9 +14,10 @@
 #include "AccountManager.h"
 #include "SkinManager.h"
 #include "VersionPicker.h"
+#include "SetupWizard.h"
 #include "GameLauncher.h"
 
-struct Inst { QString id, name, mc, ld; };
+struct Inst { QString id, name, mc, ld, rend; };
 
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
@@ -56,7 +57,7 @@ int main(int argc, char *argv[]) {
     auto save = [&]() {
         QJsonArray arr;
         for (auto &i : list) {
-            QJsonObject o; o["id"]=i.id; o["n"]=i.name; o["m"]=i.mc; o["l"]=i.ld;
+            QJsonObject o; o["id"]=i.id; o["n"]=i.name; o["m"]=i.mc; o["l"]=i.ld; o["r"]=i.rend;
             arr.append(o);
         }
         QFile f(dir + "/instances.json");
@@ -65,7 +66,7 @@ int main(int argc, char *argv[]) {
 
     auto redraw = [&]() {
         lw->clear();
-        for (auto &i : list) lw->addItem(i.name + "  [" + i.ld + " " + i.mc + "]");
+        for (auto &i : list) lw->addItem(i.name + "  [" + i.ld + " | " + i.rend + "]");
     };
 
     auto load = [&]() {
@@ -74,7 +75,9 @@ int main(int argc, char *argv[]) {
         if (f.open(QIODevice::ReadOnly)) {
             for (auto v : QJsonDocument::fromJson(f.readAll()).array()) {
                 auto o = v.toObject();
-                list.append({o["id"].toString(), o["n"].toString(), o["m"].toString(), o["l"].toString()});
+                QString r = o["r"].toString();
+                list.append({o["id"].toString(), o["n"].toString(), o["m"].toString(),
+                             o["l"].toString(), r.isEmpty() ? "Holy GL4ES" : r});
             }
             f.close();
         }
@@ -87,7 +90,13 @@ int main(int argc, char *argv[]) {
     };
 
     w.show();
-    if (StorageManager::ensureReady(dir, &w)) load();
+    if (StorageManager::ensureReady(dir, &w)) {
+        if (!SetupWizardDialog::isCompleted(dir)) {
+            SetupWizardDialog wizard(dir, net, &w);
+            wizard.exec();
+        }
+        load();
+    }
 
     QObject::connect(bAcc, &QPushButton::clicked, [&]() {
         if (!StorageManager::ensureReady(dir, &w)) return;
@@ -108,10 +117,13 @@ int main(int argc, char *argv[]) {
         if (dlg.exec() == QDialog::Accepted) {
             QString mc = dlg.selectedVer;
             QString ld = dlg.selectedLoader;
+            QString rn = dlg.selectedRenderer;
             QString id = ld + "_" + mc + "_" + QString::number(QDateTime::currentSecsSinceEpoch());
             QDir().mkpath(dir + "/instances/" + id + "/.minecraft/mods");
-            list.append({id, ld + " " + mc, mc, ld});
+            list.append({id, ld + " " + mc, mc, ld, rn});
             save(); redraw();
+            gl->prepareAndLaunch({id, ld + " " + mc, mc, ld, "latest",
+                                  curAcc.name, curAcc.type, curAcc.uuid, curAcc.token, dir, 2048, rn}, &w);
         }
     });
 
@@ -129,7 +141,7 @@ int main(int argc, char *argv[]) {
         int r = lw->currentRow();
         if (r >= 0) {
             gl->prepareAndLaunch({list[r].id, list[r].name, list[r].mc, list[r].ld,
-                                  "latest", curAcc.name, curAcc.type, curAcc.uuid, curAcc.token, dir, 2048}, &w);
+                                  "latest", curAcc.name, curAcc.type, curAcc.uuid, curAcc.token, dir, 2048, list[r].rend}, &w);
         }
     });
 
