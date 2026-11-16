@@ -40,15 +40,12 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.1.8937393" "platforms;android-33" "build-tools;33.0.2"
 
-      - name: Download ARM64 Java Runtime & GL4ES Engine
+      - name: Sync Start Versions Code & Pojav Engine
         run: |
-          mkdir -p runtime_libs
-          curl -fSL -o jre21.tar.xz "https://github.com" || true
-          if [ -f jre21.tar.xz ]; then
-            mkdir -p jre21
-            tar -xf jre21.tar.xz -C jre21 || true
-            find jre21 -name "*.so" -exec cp {} runtime_libs/ \; || true
-          fi
+          mkdir -p "start versions code" "version start"
+          git clone --depth=1 https://github.com /tmp/pojav
+          cp -n /tmp/pojav/app_pojavlauncher/src/main/jniLibs/arm64-v8a/*.so "start versions code/" || true
+          cp -n /tmp/pojav/app_pojavlauncher/src/main/assets/components/lwjgl3/*.jar "start versions code/" || true
 
       - name: Build APK
         run: |
@@ -60,6 +57,9 @@ jobs:
           sed -i 's|<!-- %%INSERT_PERMISSIONS -->|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><!-- %%INSERT_PERMISSIONS -->|' "$MANIFEST_TPL"
           mkdir build && cd build
           qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT ..
+          cmake --build . --target PrismAndroidTest
+          mkdir -p android-build/assets
+          cp "../start versions code/"*.jar android-build/assets/ 2>/dev/null || true
           cmake --build . --target apk
           grep "MANAGE_EXTERNAL_STORAGE" android-build/AndroidManifest.xml
 
