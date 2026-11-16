@@ -1,5 +1,4 @@
 #pragma once
-
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -7,17 +6,10 @@
 #include <QNetworkAccessManager>
 
 struct LaunchConfig {
-    QString instId;
-    QString instName;
-    QString mcVer;
-    QString loader;
-    QString loaderVer;
-    QString nick;
-    QString accType;
-    QString uuid;
-    QString token;
-    QString dataDir;
+    QString instId, instName, mcVer, loader, loaderVer;
+    QString nick, accType, uuid, token, dataDir;
     int ramMb = 2048;
+    QString renderer = "Holy GL4ES";
 };
 
 class GameLauncher : public QObject {
@@ -32,10 +24,9 @@ private:
 
     QString selectJavaVersion(const QString &mcVer);
     void downloadVersionManifest(const LaunchConfig &cfg, QWidget *parentUi);
-    void parseAndDownloadLibraries(const QByteArray &verJsonBytes, const LaunchConfig &cfg, QWidget *parentUi);
+    void parseAndDownloadLibraries(const QByteArray &raw, const LaunchConfig &cfg, QWidget *parentUi);
     void downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg, QWidget *parentUi, class QProgressDialog *dlg);
-    void downloadClientJar(const QString &clientUrl, const QString &jarPath,
-                           const LaunchConfig &cfg, QWidget *parentUi);
+    void downloadClientJar(const QString &url, const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi);
     void ensureJavaAndRun(const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi);
     void startJavaProcess(const QString &javaBin, const QString &jarPath, const LaunchConfig &cfg, QWidget *parentUi);
 };
