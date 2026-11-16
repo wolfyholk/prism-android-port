@@ -13,6 +13,7 @@ qt_add_executable(PrismAndroidTest
     StorageManager.h
     TouchControls.h
     AccountManager.h
+    SetupWizard.h
     SkinManager.h
     JvmRunner.h
     VersionPicker.h
