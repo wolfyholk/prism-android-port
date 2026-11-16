@@ -29,7 +29,7 @@ void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *ui) {
 }
 
 void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *ui) {
-    auto *dlg = new QProgressDialog("Метаданные " + cfg.mcVer + "...", "Отмена", 0, 0, ui);
+    auto *dlg = new QProgressDialog("Поиск метаданных " + cfg.mcVer + "...", "Отмена", 0, 0, ui);
     dlg->setWindowModality(Qt::WindowModal); dlg->show();
     auto *rep = net->get(QNetworkRequest(QUrl("https://mojang.com")));
     connect(rep, &QNetworkReply::finished, [this, rep, dlg, cfg, ui]() {
@@ -40,6 +40,7 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *ui)
         QString url, tv = cfg.mcVer.trimmed();
         for (const auto &v : arr) if (v.toObject()["id"].toString().trimmed() == tv) { url = v.toObject()["url"].toString(); break; }
         if (url.isEmpty()) { QMessageBox::warning(ui, "Ошибка", "Версия " + tv + " не найдена."); return; }
+
         auto *vr = net->get(QNetworkRequest(QUrl(url)));
         connect(vr, &QNetworkReply::finished, [this, vr, cfg, ui]() {
             if (vr->error() == QNetworkReply::NoError) {
@@ -55,7 +56,8 @@ void GameLauncher::downloadVersionManifest(const LaunchConfig &cfg, QWidget *ui)
 void GameLauncher::parseAndDownloadLibraries(const QByteArray &raw, const LaunchConfig &cfg, QWidget *ui) {
     auto doc = QJsonDocument::fromJson(raw).object();
     QString jarUrl = doc["downloads"].toObject()["client"].toObject()["url"].toString();
-    libQueue.clear();
+    QList<QPair<QString, QString>> libsToGet;
+
     for (const auto &item : doc["libraries"].toArray()) {
         auto lo = item.toObject();
         if (lo.contains("rules")) {
@@ -66,45 +68,28 @@ void GameLauncher::parseAndDownloadLibraries(const QByteArray &raw, const Launch
             }
             if (!ok) continue;
         }
-        auto art = lo["downloads"].toObject()["artifact"].toObject();
-        QString u = art["url"].toString(), p = art["path"].toString();
-        if (!u.isEmpty() && !p.isEmpty()) {
-            QString lp = cfg.dataDir + "/libraries/" + p;
-            if (!QFile::exists(lp) || QFileInfo(lp).size() == 0) libQueue.append({u, lp});
+        auto dl = lo["downloads"].toObject();
+        auto art = dl["artifact"].toObject();
+        if (!art["url"].toString().isEmpty() && !art["path"].toString().isEmpty()) {
+            libsToGet.append({art["url"].toString(), cfg.dataDir + "/libraries/" + art["path"].toString()});
+        }
+        auto cls = dl["classifiers"].toObject();
+        for (const QString &key : {"natives-linux", "natives-linux-arm64"}) {
+            if (cls.contains(key)) {
+                auto nat = cls[key].toObject();
+                libsToGet.append({nat["url"].toString(), cfg.dataDir + "/libraries/" + nat["path"].toString()});
+            }
         }
     }
-    totalLibs = libQueue.size();
-    QString jp = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
-    if (!totalLibs) {
-        if (QFile::exists(jp) && QFileInfo(jp).size() > 1000000) JvmRunner::run(net, jp, cfg, ui);
-        else downloadClientJar(jarUrl, jp, cfg, ui);
-        return;
-    }
-    auto *dlg = new QProgressDialog("Загрузка Minecraft Libraries...", "Отмена", 0, totalLibs, ui);
-    dlg->setWindowModality(Qt::WindowModal); dlg->show();
-    downloadNextLibrary(jarUrl, cfg, ui, dlg);
-}
 
-void GameLauncher::downloadNextLibrary(const QString &jarUrl, const LaunchConfig &cfg, QWidget *ui, QProgressDialog *dlg) {
-    if (dlg->wasCanceled() || libQueue.isEmpty()) {
-        dlg->close(); dlg->deleteLater();
+    AssetManager::downloadBatch(net, "Докачка библиотек игры", libsToGet, ui, [this, jarUrl, cfg, ui]() {
         QString jp = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed() + "/client.jar";
         if (QFile::exists(jp) && QFileInfo(jp).size() > 1000000) JvmRunner::run(net, jp, cfg, ui);
         else downloadClientJar(jarUrl, jp, cfg, ui);
-        return;
-    }
-    auto nxt = libQueue.takeFirst();
-    dlg->setValue(totalLibs - libQueue.size());
-    QDir().mkpath(QFileInfo(nxt.second).absolutePath());
-    auto *rep = net->get(QNetworkRequest(QUrl(nxt.first)));
-    connect(rep, &QNetworkReply::finished, [this, rep, nxt, jarUrl, cfg, ui, dlg]() {
-        if (rep->error() == QNetworkReply::NoError) {
-            QFile f(nxt.second); if (f.open(QIODevice::WriteOnly)) { f.write(rep->readAll()); f.close(); }
-        }
-        rep->deleteLater();
-        downloadNextLibrary(jarUrl, cfg, ui, dlg);
     });
 }
+
+void GameLauncher::downloadNextLibrary(const QString &, const LaunchConfig &, QWidget *, QProgressDialog *) {}
 
 void GameLauncher::downloadClientJar(const QString &url, const QString &jp, const LaunchConfig &cfg, QWidget *ui) {
     auto *dlg = new QProgressDialog("Скачивание client.jar...", "Отмена", 0, 100, ui);
