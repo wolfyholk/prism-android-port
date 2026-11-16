@@ -57,7 +57,7 @@ jobs:
           from PIL import Image
           files = glob.glob("*.png") + glob.glob("*.jpg") + glob.glob("*.jpeg") + glob.glob("*.webp")
           if files:
-              img = Image.open(files).convert("RGBA").resize((512, 512))
+              img = Image.open(files[0]).convert("RGBA").resize((512, 512))
           else:
               img = Image.new("RGBA", (512, 512), (43, 124, 211, 255))
           img.save("ready_icon.png", "PNG")
