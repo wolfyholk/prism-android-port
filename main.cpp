@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QListWidget>
+#include <QTimer>
 #include <QDir>
 #include <QFile>
 #include <QDateTime>
@@ -90,13 +91,16 @@ int main(int argc, char *argv[]) {
     };
 
     w.show();
-    if (StorageManager::ensureReady(dir, &w)) {
-        if (!SetupWizardDialog::isCompleted(dir)) {
-            SetupWizardDialog wizard(dir, net, &w);
-            wizard.exec();
+
+    QTimer::singleShot(250, [&]() {
+        if (StorageManager::ensureReady(dir, &w)) {
+            if (!SetupWizardDialog::isCompleted(dir)) {
+                SetupWizardDialog wizard(dir, net, &w);
+                wizard.exec();
+            }
+            load();
         }
-        load();
-    }
+    });
 
     QObject::connect(bAcc, &QPushButton::clicked, [&]() {
         if (!StorageManager::ensureReady(dir, &w)) return;
