@@ -1,77 +1,35 @@
 name: Build Qt Android APK
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
+on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Checkout OpenSSL
-        uses: actions/checkout@v4
-        with:
-          repository: KDAB/android_openssl
-          path: openssl
-
-      - name: Checkout Pojav Engine
-        uses: actions/checkout@v4
-        with:
-          repository: PojavLauncherTeam/PojavLauncher
-          path: pojav
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install Qt 6.6.3 for Android
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.6.3'
-          host: 'linux'
-          target: 'android'
-          arch: 'android_arm64_v8a'
-          setup-python: 'true'
-
-      - name: Prepare Android SDK 33
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: KDAB/android_openssl, path: openssl }
+      - uses: actions/checkout@v4
+        with: { repository: PojavLauncherTeam/PojavLauncher, path: pojav }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: jurplel/install-qt-action@v4
+        with: { version: '6.6.3', host: linux, target: android, arch: android_arm64_v8a, setup-python: 'true' }
+      - name: SDK & Assets
         run: |
           rm -rf $ANDROID_HOME/platforms/android-35* $ANDROID_HOME/platforms/android-36*
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.1.8937393" "platforms;android-33" "build-tools;33.0.2"
-
-      - name: Sync Start Versions Code & Icon
-        run: |
           mkdir -p "start versions code" "version start" android_pkg/res/mipmap-xxxhdpi android_pkg/assets
           cp -n pojav/app_pojavlauncher/src/main/jniLibs/arm64-v8a/*.so "start versions code/" || true
           cp -n pojav/app_pojavlauncher/src/main/assets/components/lwjgl3/*.jar "start versions code/" || true
           cp "start versions code/"*.jar android_pkg/assets/ 2>/dev/null || true
           pip install pillow -q
-          python3 -c '
-          import glob
-          from PIL import Image
-          files = glob.glob("*.png") + glob.glob("*.jpg") + glob.glob("*.jpeg") + glob.glob("*.webp")
-          if files:
-              img = Image.open(files).convert("RGBA").resize((512, 512))
-          else:
-              img = Image.new("RGBA", (512, 512), (43, 124, 211, 255))
-          img.save("android_pkg/res/mipmap-xxxhdpi/ic_launcher.png", "PNG")
-          '
-
+          python3 -c 'import glob; from PIL import Image; f=glob.glob("*.png")+glob.glob("*.jpg")+glob.glob("*.jpeg"); (Image.open(f[0]).convert("RGBA").resize((512,512)) if f else Image.new("RGBA",(512,512),(43,124,211,255))).save("android_pkg/res/mipmap-xxxhdpi/ic_launcher.png")'
       - name: Build APK
         run: |
-          export ANDROID_SDK_ROOT=$ANDROID_HOME
-          export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.1.8937393
+          export ANDROID_SDK_ROOT=$ANDROID_HOME ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.1.8937393
           QT_DIR="/home/runner/work/prism-android-port/Qt/6.6.3/android_arm64_v8a"
           export PATH="$QT_DIR/bin:/home/runner/work/prism-android-port/Qt/6.6.3/gcc_64/bin:$PATH"
-          MANIFEST_TPL=$(find "$QT_DIR" -name AndroidManifest.xml | head -n 1)
-          cp "$MANIFEST_TPL" android_pkg/AndroidManifest.xml
+          cp $(find "$QT_DIR" -name AndroidManifest.xml | head -n 1) android_pkg/AndroidManifest.xml
           sed -i 's|<!-- %%INSERT_PERMISSIONS -->|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><!-- %%INSERT_PERMISSIONS -->|' android_pkg/AndroidManifest.xml
           sed -i 's|-- %%INSERT_APP_NAME%% --|Prism Launcher|g' android_pkg/AndroidManifest.xml
           sed -i 's|<application|<application android:icon="@mipmap/ic_launcher"|' android_pkg/AndroidManifest.xml
@@ -79,9 +37,5 @@ jobs:
           mkdir build && cd build
           qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DQT_ANDROID_PACKAGE_SOURCE_DIR="$PKG_DIR" ..
           cmake --build . --target apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: PrismLauncher-APK
-          path: build/android-build/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: PrismLauncher-APK, path: build/android-build/build/outputs/apk/debug/*.apk }
