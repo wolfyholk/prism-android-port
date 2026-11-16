@@ -23,6 +23,7 @@ void GameLauncher::prepareAndLaunch(const LaunchConfig &cfg, QWidget *ui) {
     QString vDir = cfg.dataDir + "/versions/" + cfg.mcVer.trimmed();
     QDir().mkpath(cfg.dataDir + "/instances/" + cfg.instId + "/mods");
     QDir().mkpath(cfg.dataDir + "/libraries");
+    QDir().mkpath(cfg.dataDir + "/renderers");
     QDir().mkpath(vDir);
     downloadVersionManifest(cfg, ui);
 }
@@ -75,7 +76,7 @@ void GameLauncher::parseAndDownloadLibraries(const QByteArray &raw, const Launch
         else downloadClientJar(jarUrl, jp, cfg, ui);
         return;
     }
-    auto *dlg = new QProgressDialog("Библиотеки...", "Отмена", 0, totalLibs, ui);
+    auto *dlg = new QProgressDialog("Загрузка библиотек...", "Отмена", 0, totalLibs, ui);
     dlg->setWindowModality(Qt::WindowModal); dlg->show();
     downloadNextLibrary(jarUrl, cfg, ui, dlg);
 }
@@ -142,6 +143,25 @@ void GameLauncher::ensureJavaAndRun(const QString &jp, const LaunchConfig &cfg, 
 }
 
 void GameLauncher::startJavaProcess(const QString &jBin, const QString &jp, const LaunchConfig &cfg, QWidget *ui) {
+    QString glLib = "libgl4es_114.so";
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    if (cfg.renderer == "Zink") {
+        glLib = "libOSMesa.so";
+        env.insert("MESA_LOADER_DRIVER_OVERRIDE", "zink");
+        env.insert("GALLIUM_DRIVER", "zink");
+    } else if (cfg.renderer == "Freedreno") {
+        glLib = "libOSMesa.so";
+        env.insert("MESA_LOADER_DRIVER_OVERRIDE", "freedreno");
+        env.insert("GALLIUM_DRIVER", "freedreno");
+    } else if (cfg.renderer == "LTW") {
+        glLib = "libltw.so";
+    } else if (cfg.renderer == "OpenGL") {
+        glLib = "libGLESv2.so";
+    } else {
+        env.insert("LIBGL_ES", "2");
+        env.insert("LIBGL_MIPMAP", "3");
+    }
+
     QStringList cp;
     QList<QDir> st = {QDir(cfg.dataDir + "/libraries")};
     while (!st.isEmpty()) {
@@ -153,15 +173,16 @@ void GameLauncher::startJavaProcess(const QString &jBin, const QString &jp, cons
     QString gDir = cfg.dataDir + "/instances/" + cfg.instId + "/.minecraft";
     QDir().mkpath(gDir + "/resourcepacks");
 
-    QStringList args = {"-Xmx" + QString::number(cfg.ramMb) + "M", "-Dorg.lwjgl.opengl.libname=libgl4es_114.so",
+    QStringList args = {"-Xmx" + QString::number(cfg.ramMb) + "M", "-Dorg.lwjgl.opengl.libname=" + glLib,
                         "-cp", cp.join(":"), "net.minecraft.client.main.Main", "--username", cfg.nick,
                         "--version", cfg.mcVer.trimmed(), "--gameDir", gDir, "--assetsDir", cfg.dataDir + "/assets",
                         "--uuid", cfg.uuid, "--accessToken", cfg.token};
     auto *p = new QProcess(ui);
+    p->setProcessEnvironment(env);
     p->setWorkingDirectory(gDir);
     p->start(jBin, args);
 
-    TouchOverlay ov(cfg.mcVer + " | " + cfg.nick, ui);
+    TouchOverlay ov(cfg.mcVer + " [" + cfg.renderer + "] | " + cfg.nick, ui);
     ov.exec();
     if (p->state() != QProcess::NotRunning) p->kill();
 }
