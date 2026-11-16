@@ -48,9 +48,10 @@ jobs:
 
       - name: Sync Start Versions Code & Icon
         run: |
-          mkdir -p "start versions code" "version start"
+          mkdir -p "start versions code" "version start" android_pkg/res/mipmap-xxxhdpi android_pkg/assets
           cp -n pojav/app_pojavlauncher/src/main/jniLibs/arm64-v8a/*.so "start versions code/" || true
           cp -n pojav/app_pojavlauncher/src/main/assets/components/lwjgl3/*.jar "start versions code/" || true
+          cp "start versions code/"*.jar android_pkg/assets/ 2>/dev/null || true
           pip install pillow -q
           python3 -c '
           import glob
@@ -60,7 +61,7 @@ jobs:
               img = Image.open(files[0]).convert("RGBA").resize((512, 512))
           else:
               img = Image.new("RGBA", (512, 512), (43, 124, 211, 255))
-          img.save("ready_icon.png", "PNG")
+          img.save("android_pkg/res/mipmap-xxxhdpi/ic_launcher.png", "PNG")
           '
 
       - name: Build APK
@@ -70,18 +71,13 @@ jobs:
           QT_DIR="/home/runner/work/prism-android-port/Qt/6.6.3/android_arm64_v8a"
           export PATH="$QT_DIR/bin:/home/runner/work/prism-android-port/Qt/6.6.3/gcc_64/bin:$PATH"
           MANIFEST_TPL=$(find "$QT_DIR" -name AndroidManifest.xml | head -n 1)
-          sed -i 's|<!-- %%INSERT_PERMISSIONS -->|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><!-- %%INSERT_PERMISSIONS -->|' "$MANIFEST_TPL"
-          sed -i 's|-- %%INSERT_APP_NAME%% --|Prism Launcher|g' "$MANIFEST_TPL"
-          sed -i 's|<application|<application android:icon="@mipmap/ic_launcher"|' "$MANIFEST_TPL"
+          cp "$MANIFEST_TPL" android_pkg/AndroidManifest.xml
+          sed -i 's|<!-- %%INSERT_PERMISSIONS -->|<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/><!-- %%INSERT_PERMISSIONS -->|' android_pkg/AndroidManifest.xml
+          sed -i 's|-- %%INSERT_APP_NAME%% --|Prism Launcher|g' android_pkg/AndroidManifest.xml
+          sed -i 's|<application|<application android:icon="@mipmap/ic_launcher"|' android_pkg/AndroidManifest.xml
+          PKG_DIR="$PWD/android_pkg"
           mkdir build && cd build
-          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT ..
-          cmake --build . --target PrismAndroidTest
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            mkdir -p "android-build/res/$d"
-            cp ../ready_icon.png "android-build/res/$d/ic_launcher.png"
-          done
-          mkdir -p android-build/assets
-          cp "../start versions code/"*.jar android-build/assets/ 2>/dev/null || true
+          qt-cmake -GNinja -DANDROID_ABI=arm64-v8a -DANDROID_SDK_ROOT=$ANDROID_SDK_ROOT -DANDROID_NDK_ROOT=$ANDROID_NDK_ROOT -DQT_ANDROID_PACKAGE_SOURCE_DIR="$PKG_DIR" ..
           cmake --build . --target apk
           grep "MANAGE_EXTERNAL_STORAGE" android-build/AndroidManifest.xml
 
